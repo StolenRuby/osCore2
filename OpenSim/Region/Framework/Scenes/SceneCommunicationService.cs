@@ -263,7 +263,8 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 foreach (ulong handle in regionslst)
                 {
-                    SendCloseChildAgent(agentID, handle, auth_code);
+                     Thread.Sleep(1000); 
+	             SendCloseChildAgent(agentID, handle, auth_code);
                 }
             }, null, "SceneCommunicationService.SendCloseChildAgentConnections");
         }
