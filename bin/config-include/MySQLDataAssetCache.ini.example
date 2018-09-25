@@ -1,0 +1,18 @@
+[AssetCache]
+    ;;
+    ;; Options for MySQLDataAssetCache
+    ;;
+
+    ; Set to false for no database cache
+    CacheEnabled = true
+
+    ; MySql
+    ; Change the connection string to your db details
+    ConnectionString = "Data Source=localhost;Database=assetcache;User ID=opensim;Password=***;Old Guids=true;"
+
+    ; How long {in hours} to keep assets cached in the database, .5 == 30 minutes
+    ; However, the timer to check the assets will only run once an hour.
+    ; Specify 0 if you do not want your cache to expire
+    CacheTimeout = 0
+
+

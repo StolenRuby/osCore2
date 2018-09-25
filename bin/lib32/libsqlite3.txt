@@ -1,1 +1,1 @@
-libsqlite version: 3.7.5
+libsqlite version: 3.24.0
