@@ -1,4 +1,5 @@
-/*
+/* 30 August 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -28,7 +29,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Reflection;
 using System.Threading;
 using log4net;
@@ -44,8 +44,6 @@ using Caps = OpenSim.Framework.Capabilities.Caps;
 using OpenSim.Capabilities.Handlers;
 using OpenSim.Framework.Monitoring;
 
-using OpenMetaverse.StructuredData;
-
 namespace OpenSim.Region.ClientStack.Linden
 {
     /// <summary>
@@ -54,12 +52,13 @@ namespace OpenSim.Region.ClientStack.Linden
     [Extension(Path = "/OpenSim/RegionModules", NodeName = "RegionModule", Id = "WebFetchInvDescModule")]
     public class WebFetchInvDescModule : INonSharedRegionModule
     {
-        class APollRequest
+        class aPollRequest
         {
             public PollServiceInventoryEventArgs thepoll;
             public UUID reqID;
             public Hashtable request;
             public ScenePresence presence;
+            public List<UUID> folders;
         }
 
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
@@ -83,23 +82,28 @@ namespace OpenSim.Region.ClientStack.Linden
         private static Stat s_queuedRequestsStat;
         private static Stat s_processedRequestsStat;
 
-        public Scene Scene { get; private set; }
+        private static Scene m_scene = null;
+        public Scene Scene { get { return m_scene; }
+                             private set { m_scene = value; }  }
 
-        private IInventoryService m_InventoryService;
-        private ILibraryService m_LibraryService;
+        private static IInventoryService m_InventoryService;
+        private static ILibraryService m_LibraryService;
 
         private bool m_Enabled;
 
         private string m_fetchInventoryDescendents2Url;
-//        private string m_webFetchInventoryDescendentsUrl;
 
-        private static FetchInvDescHandler m_webFetchHandler;
-
-        private static Thread[] m_workerThreads = null;
-
-        private static BlockingCollection<APollRequest> m_queue = new BlockingCollection<APollRequest>();
+        // private static FetchInvDescHandler m_webFetchHandler = null;
 
         private static int m_NumberScenes = 0;
+
+        private static Queue<aPollRequest> m_queue = new Queue<aPollRequest>();
+        private static ManualResetEvent m_signal = new ManualResetEvent(true);
+
+        private static object m_queueSync = new object();
+        private static volatile bool m_running = true;
+
+        private static System.Threading.Timer[] m_queueTimer = new System.Threading.Timer[2] { null, null };
 
         #region ISharedRegionModule Members
 
@@ -107,7 +111,7 @@ namespace OpenSim.Region.ClientStack.Linden
 
         public WebFetchInvDescModule(bool processQueuedResultsAsync)
         {
-            ProcessQueuedRequestsAsync = processQueuedResultsAsync;
+            ProcessQueuedRequestsAsync = true; //  processQueuedResultsAsync;
         }
 
         public void Initialise(IConfigSource source)
@@ -117,9 +121,6 @@ namespace OpenSim.Region.ClientStack.Linden
                 return;
 
             m_fetchInventoryDescendents2Url = config.GetString("Cap_FetchInventoryDescendents2", string.Empty);
-//            m_webFetchInventoryDescendentsUrl = config.GetString("Cap_WebFetchInventoryDescendents", string.Empty);
-
-//            if (m_fetchInventoryDescendents2Url != string.Empty || m_webFetchInventoryDescendentsUrl != string.Empty)
             if (m_fetchInventoryDescendents2Url != string.Empty)
             {
                 m_Enabled = true;
@@ -146,6 +147,11 @@ namespace OpenSim.Region.ClientStack.Linden
 
             m_NumberScenes--;
             Scene = null;
+
+            if (m_NumberScenes <= 0)
+            {
+                m_running = false;
+            }
         }
 
         public void RegionLoaded(Scene s)
@@ -168,6 +174,7 @@ namespace OpenSim.Region.ClientStack.Linden
                         StatVerbosity.Debug);
 
             if (s_queuedRequestsStat == null)
+            {
                 s_queuedRequestsStat =
                     new Stat(
                         "QueuedFetchInventoryRequests",
@@ -178,8 +185,9 @@ namespace OpenSim.Region.ClientStack.Linden
                         "httpfetch",
                         StatType.Pull,
                         MeasuresOfInterest.AverageChangeOverTime,
-                        stat => { stat.Value = m_queue.Count; },
+                        stat => { lock (m_queue) { stat.Value = m_queue.Count; } },
                         StatVerbosity.Debug);
+            }
 
             StatsManager.RegisterStat(s_processedRequestsStat);
             StatsManager.RegisterStat(s_queuedRequestsStat);
@@ -187,27 +195,18 @@ namespace OpenSim.Region.ClientStack.Linden
             m_InventoryService = Scene.InventoryService;
             m_LibraryService = Scene.LibraryService;
 
-            // We'll reuse the same handler for all requests.
-            m_webFetchHandler = new FetchInvDescHandler(m_InventoryService, m_LibraryService, Scene);
-
             Scene.EventManager.OnRegisterCaps += RegisterCaps;
 
             m_NumberScenes++;
 
-            int nworkers = 2; // was 2
-            if (ProcessQueuedRequestsAsync && m_workerThreads == null)
+            if (m_NumberScenes == 1)
             {
-                m_workerThreads = new Thread[nworkers];
-
-                for (uint i = 0; i < nworkers; i++)
+                m_running = true;
+                for (int i = 0; i < 2; i++)
                 {
-                    m_workerThreads[i] = WorkManager.StartThread(DoInventoryRequests,
-                            String.Format("InventoryWorkerThread{0}", i),
-                            ThreadPriority.Normal,
-                            true,
-                            true,
-                            null,
-                            int.MaxValue);
+                    m_queueTimer[i] = new System.Threading.Timer(
+                                           delegate { DoInventoryRequests(); },
+                                           null, 0, Timeout.Infinite);
                 }
             }
         }
@@ -221,18 +220,22 @@ namespace OpenSim.Region.ClientStack.Linden
             if (!m_Enabled)
                 return;
 
-            if (ProcessQueuedRequestsAsync)
+            if (m_NumberScenes <= 0)
             {
-                if (m_NumberScenes <= 0 && m_workerThreads != null)
+                m_log.DebugFormat("[WebFetchInvDescModule] Closing");
+                try
                 {
-                    m_log.DebugFormat("[WebFetchInvDescModule] Closing");
-                    foreach (Thread t in m_workerThreads)
-                        Watchdog.AbortThread(t.ManagedThreadId);
+                    lock (m_queueSync)
+                    {
+                        m_running = false;
+                        m_queue.Clear();
 
-                    m_workerThreads = null;
+                        // Wake the threads so they will notice m_running = false and end.
+                        m_signal.Set();
+                    }
                 }
+                catch { }
             }
-//            m_queue.Dispose();
         }
 
         public string Name { get { return "WebFetchInvDescModule"; } }
@@ -248,28 +251,17 @@ namespace OpenSim.Region.ClientStack.Linden
         {
             private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-            private Dictionary<UUID, Hashtable> responses = new Dictionary<UUID, Hashtable>();
-            private HashSet<UUID> dropedResponses = new HashSet<UUID>();
+            private Dictionary<UUID, Hashtable> responses =
+                    new Dictionary<UUID, Hashtable>();
 
             private WebFetchInvDescModule m_module;
 
             public PollServiceInventoryEventArgs(WebFetchInvDescModule module, string url, UUID pId) :
-                base(null, url, null, null, null, null, pId, int.MaxValue)
+                base(null, url, null, null, null, pId, int.MaxValue)
             {
                 m_module = module;
 
                 HasEvents = (x, y) => { lock (responses) return responses.ContainsKey(x); };
-
-                Drop = (x, y) =>
-                {
-                    lock (responses)
-                    {
-                        responses.Remove(x);
-                        lock(dropedResponses)
-                            dropedResponses.Add(x);
-                    }
-                };
-
                 GetEvents = (x, y) =>
                 {
                     lock (responses)
@@ -289,15 +281,13 @@ namespace OpenSim.Region.ClientStack.Linden
                 {
                     ScenePresence sp = m_module.Scene.GetScenePresence(Id);
 
-                    APollRequest reqinfo = new APollRequest();
+                    aPollRequest reqinfo = new aPollRequest();
                     reqinfo.thepoll = this;
                     reqinfo.reqID = x;
                     reqinfo.request = y;
                     reqinfo.presence = sp;
+                    reqinfo.folders = new List<UUID>();
 
-/* why where we doing this? just to get cof ?
-                    List<UUID> folders = new List<UUID>();
-                                        
                     // Decode the request here
                     string request = y["body"].ToString();
 
@@ -324,8 +314,6 @@ namespace OpenSim.Region.ClientStack.Linden
 
                     ArrayList foldersrequested = (ArrayList)hash["folders"];
 
-                    bool highPriority = false;
-
                     for (int i = 0; i < foldersrequested.Count; i++)
                     {
                         Hashtable inventoryhash = (Hashtable)foldersrequested[i];
@@ -333,92 +321,58 @@ namespace OpenSim.Region.ClientStack.Linden
                         UUID folderID;
                         if (UUID.TryParse(folder, out folderID))
                         {
-                            if (!folders.Contains(folderID))
+                            if (!reqinfo.folders.Contains(folderID))
                             {
-                                if (sp.COF != UUID.Zero && sp.COF == folderID)
-                                    highPriority = true;
-                                folders.Add(folderID);
+                                reqinfo.folders.Add(folderID);
                             }
                         }
                     }
 
-                    if (highPriority)
-                        m_queue.PriorityEnqueue(reqinfo);
-                    else
-*/
-                        m_queue.Add(reqinfo);
+                    lock (m_queueSync)
+                    {
+                        m_queue.Enqueue(reqinfo);
+                        m_signal.Set();
+                    }
                 };
 
                 NoEvents = (x, y) =>
                 {
-/*
-                    lock (requests)
-                    {
-                        Hashtable request = requests.Find(id => id["RequestID"].ToString() == x.ToString());
-                        requests.Remove(request);
-                    }
-*/
                     Hashtable response = new Hashtable();
 
                     response["int_response_code"] = 500;
                     response["str_response_string"] = "Script timeout";
                     response["content_type"] = "text/plain";
                     response["keepalive"] = false;
+                    response["reusecontext"] = false;
 
                     return response;
                 };
             }
 
-            public void Process(APollRequest requestinfo)
+            public void Process(aPollRequest requestinfo, FetchInvDescHandler webFetchHandler)
             {
                 if(m_module == null || m_module.Scene == null || m_module.Scene.ShuttingDown)
                     return;
 
                 UUID requestID = requestinfo.reqID;
 
-
-                lock(responses)
-                {
-                    lock(dropedResponses)
-                    {
-                        if(dropedResponses.Contains(requestID))
-                        {
-                            dropedResponses.Remove(requestID);
-                            return;
-                        }
-                    }
-                }
-
                 Hashtable response = new Hashtable();
 
                 response["int_response_code"] = 200;
                 response["content_type"] = "text/plain";
+                response["keepalive"] = false;
+                response["reusecontext"] = false;
 
-//                response["str_response_string"] = m_webFetchHandler.FetchInventoryDescendentsRequest(
-//                        requestinfo.request["body"].ToString(), String.Empty, String.Empty, null, null);
+                response["str_response_string"] = webFetchHandler.FetchInventoryDescendentsRequest(
+                        requestinfo.request["body"].ToString(), String.Empty, String.Empty, null, null);
 
-                response["bin_response_data"] = System.Text.Encoding.UTF8.GetBytes(
-                        m_webFetchHandler.FetchInventoryDescendentsRequest(
-                                    requestinfo.request["body"].ToString(),
-                                    String.Empty, String.Empty, null, null)
-                        );
                 lock (responses)
                 {
-                    lock(dropedResponses)
-                    {
-                        if(dropedResponses.Contains(requestID))
-                        {
-                            dropedResponses.Remove(requestID);
-                            requestinfo.request.Clear();
-                            WebFetchInvDescModule.ProcessedRequestsCount++;
-                            return;
-                        }
-                    }
-
                     if (responses.ContainsKey(requestID))
                         m_log.WarnFormat("[FETCH INVENTORY DESCENDENTS2 MODULE]: Caught in the act of loosing responses! Please report this on mantis #7054");
                     responses[requestID] = response;
                 }
+                requestinfo.folders.Clear();
                 requestinfo.request.Clear();
                 WebFetchInvDescModule.ProcessedRequestsCount++;
             }
@@ -459,47 +413,56 @@ namespace OpenSim.Region.ClientStack.Linden
                 else
                     caps.RegisterHandler(capName, capUrl);
             }
-
-            // m_log.DebugFormat(
-            //     "[FETCH INVENTORY DESCENDENTS2 MODULE]: Registered capability {0} at {1} in region {2} for {3}",
-            //     capName, capUrl, m_scene.RegionInfo.RegionName, agentID);
         }
-
-//        private void DeregisterCaps(UUID agentID, Caps caps)
-//        {
-//            string capUrl;
-//
-//            if (m_capsDict.TryGetValue(agentID, out capUrl))
-//            {
-//                MainServer.Instance.RemoveHTTPHandler("", capUrl);
-//                m_capsDict.Remove(agentID);
-//            }
-//        }
 
         private static void DoInventoryRequests()
         {
-            APollRequest poolreq;
-            while (true)
+            FetchInvDescHandler getHandler = new FetchInvDescHandler(m_InventoryService, m_LibraryService, m_scene);
+            while (m_running)
             {
-                if(!m_queue.TryTake(out poolreq, 4500) || poolreq == null || poolreq.thepoll == null)
-                {
-                    Watchdog.UpdateThread();
-                    continue;
-                }
-
-                Watchdog.UpdateThread();
                 try
                 {
-                    APollRequest req = poolreq;
-                    req.thepoll.Process(req);
+                    aPollRequest poolreq = new aPollRequest();
+                    bool wait = false;
+                    lock (m_queueSync)
+                    {
+                        if (m_queue.Count > 0)
+                        {
+                            poolreq = m_queue.Dequeue();
+                            m_signal.Set();
+                        }
+                        else
+                        {
+                            // Reset flag to wait for a new requests.
+                            m_signal.Reset();
+                            wait = true;
+                        }
+                    }
+
+                    try
+                    {
+                        if (wait)
+                        {
+                            m_signal.WaitOne();
+                        }
+                        else
+                        {
+                            poolreq.thepoll.Process(poolreq, getHandler);
+                        }
+                    }
+                    catch { }
+
+                    // Make sure the thread stays awake while there are requests.
+                    m_signal.Set();
                 }
-                catch (Exception e)
-                {
-                    m_log.ErrorFormat(
-                        "[INVENTORY]: Failed to process queued inventory request {0} for {1}.  Exception {2}",
-                        poolreq.reqID, poolreq.presence != null ? poolreq.presence.Name : "unknown", e);
-                }
+                catch { }
             }
+            // exiting the thread now
+            try
+            {
+                m_signal.Set(); // Wake other threads as well so they will end.
+            }
+            catch { }
         }
     }
 }

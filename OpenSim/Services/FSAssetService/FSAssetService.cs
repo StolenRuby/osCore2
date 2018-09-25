@@ -1,4 +1,5 @@
-/*
+/* 15 April 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -326,12 +327,26 @@ namespace OpenSim.Services.FSAssetService
                             {
                                 byte[] data = File.ReadAllBytes(files[i]);
 
-                                using (GZipStream gz = new GZipStream(new FileStream(diskFile + ".gz", FileMode.Create), CompressionMode.Compress))
+                                bool zipped = false;
+                                using (FileStream fs = new FileStream(diskFile + ".gz", FileMode.Create))
                                 {
-                                    gz.Write(data, 0, data.Length);
-                                    gz.Close();
+                                    if (fs != null)
+                                    {
+                                        using (GZipStream gz = new GZipStream(fs, CompressionMode.Compress))
+                                        {
+                                            gz.Write(data, 0, data.Length);
+                                            gz.Close();
+                                            zipped = true;
+                                        }
+                                    }
                                 }
-                                File.Delete(files[i]);
+
+                                // No use deleting a file we could not zip.
+                                // Better to leave the unzipped version so we can use it for cache Get requests.
+                                if (zipped) 
+                                {
+                                    File.Delete(files[i]);
+                                }
 
                                 //File.Move(files[i], diskFile);
                             }
@@ -571,30 +586,35 @@ namespace OpenSim.Services.FSAssetService
             {
                 try
                 {
-                    using (GZipStream gz = new GZipStream(new FileStream(diskFile + ".gz", FileMode.Open, FileAccess.Read), CompressionMode.Decompress))
+                    using (FileStream fs = new FileStream(diskFile + ".gz", FileMode.Open, FileAccess.Read))
                     {
-                        using (MemoryStream ms = new MemoryStream())
+                        using (GZipStream gz = new GZipStream(fs, CompressionMode.Decompress))
                         {
-                            byte[] data = new byte[32768];
-                            int bytesRead;
-
-                            do
+                            using (MemoryStream ms = new MemoryStream())
                             {
-                                bytesRead = gz.Read(data, 0, 32768);
-                                if (bytesRead > 0)
-                                    ms.Write(data, 0, bytesRead);
-                            } while (bytesRead > 0);
+                                byte[] data = new byte[32768];
+                                int bytesRead;
 
-                            return ms.ToArray();
+                                do
+                                {
+                                    bytesRead = gz.Read(data, 0, 32768);
+                                    if (bytesRead > 0)
+                                        ms.Write(data, 0, bytesRead);
+                                } while (bytesRead > 0);
+
+                                return ms.ToArray();
+                            }
                         }
                     }
                 }
                 catch (Exception)
                 {
-                    return new Byte[0];
+                    // Do not exit here, instead go look for the not yet zipped version of the file.
                 }
             }
-            else if (File.Exists(diskFile))
+
+            // Third try.
+            if (File.Exists(diskFile))
             {
                 try
                 {
@@ -635,13 +655,23 @@ namespace OpenSim.Services.FSAssetService
                         asset.Data = Utils.StringToBytes(xml);
                     }
 
-                    FileStream fs = File.Create(tempFile);
+                    try
+                    {
+                        FileStream fs = File.Create(tempFile);
 
-                    fs.Write(asset.Data, 0, asset.Data.Length);
+                        fs.Write(asset.Data, 0, asset.Data.Length);
 
-                    fs.Close();
+                        fs.Close();
 
-                    File.Move(tempFile, finalFile);
+                        File.Move(tempFile, finalFile);
+                    }
+                    catch
+                    {
+                        if (asset.Metadata.Type == -2)
+                            return asset.ID;
+
+                        return UUID.Zero.ToString();
+                    }
                 }
             }
 

@@ -1,4 +1,5 @@
-/*
+/* 23 june 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -301,8 +302,11 @@ namespace OpenSim.Region.Framework.Scenes
             // Even though we don't use child part state parameters for attachments any more, we still need to set
             // these to zero since having them non-zero in rezzed scene objects will crash some clients.  Even if
             // we store them correctly, scene objects that we receive from elsewhere might not.
-            foreach (SceneObjectPart part in Parts)
-                part.Shape.State = 0;
+            int nparts = Parts.Length;
+            for (int i = 0; i < nparts; i++)
+            {
+                Parts[i].Shape.State = 0;
+            }
         }
 
         /// <summary>
@@ -436,7 +440,8 @@ namespace OpenSim.Region.Framework.Scenes
                 Vector3 finalScale = new Vector3(0.5f, 0.5f, 0.5f);
 
                 SceneObjectPart[] parts = m_parts.GetArray();
-                for (int i = 0; i < parts.Length; i++)
+                int nparts = parts.Length;
+                for (int i = 0; i < nparts; i++)
                 {
                     SceneObjectPart part = parts[i];
                     Vector3 partscale = part.Scale;
@@ -484,12 +489,12 @@ namespace OpenSim.Region.Framework.Scenes
         public bool ContainsPart(uint localID)
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 if (parts[i].LocalId == localID)
                     return true;
             }
-
             return false;
         }
 
@@ -508,7 +513,8 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 m_regionHandle = value;
                 SceneObjectPart[] parts = m_parts.GetArray();
-                for (int i = 0; i < parts.Length; i++)
+                int nparts = parts.Length;
+                for (int i = 0; i < nparts; i++)
                     parts[i].RegionHandle = value;
             }
         }
@@ -589,11 +595,11 @@ namespace OpenSim.Region.Framework.Scenes
                 // this is needed because physics may not have linksets but just loose SOPs in world
 
                 SceneObjectPart[] parts = m_parts.GetArray();
-
-                foreach (SceneObjectPart part in parts)
+                int nparts = parts.Length;
+                for(int i=0; i<nparts; i++)
                 {
-                    if (part != m_rootPart)
-                        part.GroupPosition = val;
+                    if (parts[i] != m_rootPart)
+                        parts[i].GroupPosition = val;
                 }
 
                 foreach (ScenePresence av in m_sittingAvatars)
@@ -604,9 +610,9 @@ namespace OpenSim.Region.Framework.Scenes
                 // now that position is changed tell it to scripts
                 if (triggerScriptEvent)
                 {
-                    foreach (SceneObjectPart part in parts)
+                    for (int i = 0; i < nparts; i++)
                     {
-                        part.TriggerScriptChangedEvent(Changed.POSITION);
+                        parts[i].TriggerScriptChangedEvent(Changed.POSITION);
                     }
                 }
 
@@ -930,11 +936,11 @@ namespace OpenSim.Region.Framework.Scenes
                 rootp.Stop();
 
                 SceneObjectPart[] parts = sog.m_parts.GetArray();
-
-                foreach (SceneObjectPart part in parts)
+                int nparts = parts.Length;
+                for (int i = 0; i < nparts; i++)
                 {
-                    if (part != rootp)
-                        part.GroupPosition = oldp;
+                    if (parts[i] != rootp)
+                        parts[i].GroupPosition = oldp;
                 }
 
                 foreach (ScenePresence av in sog.m_sittingAvatars)
@@ -1184,7 +1190,8 @@ namespace OpenSim.Region.Framework.Scenes
 
                     // Pass it on to the children.
                     SceneObjectPart[] parts = m_parts.GetArray();
-                    for (int i = 0; i < parts.Length; i++)
+                    int nparts = parts.Length;
+                    for (int i = 0; i < nparts; i++)
                     {
                         SceneObjectPart child = parts[i];
 
@@ -1218,10 +1225,10 @@ namespace OpenSim.Region.Framework.Scenes
                 // but that will require extra code in several places
 
                 SceneObjectPart[] parts = m_parts.GetArray();
-                for (int i = 0; i < parts.Length; i++)
+                int nparts = parts.Length;
+                for (int i = 0; i < nparts; i++)
                 {
-                    SceneObjectPart part = parts[i];
-                    if (part.IsSelected)
+                    if (parts[i].IsSelected)
                         return;
                 }
                 IsSelected = partSelect;
@@ -1465,7 +1472,8 @@ namespace OpenSim.Region.Framework.Scenes
                 m_rootPart.LocalId = m_scene.AllocateLocalId();
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 SceneObjectPart part = parts[i];
                 if (part.KeyframeMotion != null)
@@ -1504,10 +1512,9 @@ namespace OpenSim.Region.Framework.Scenes
             // Find closest hit here
             float idist = float.MaxValue;
 
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-
                 // Temporary commented to stop compiler warning
                 //Vector3 partPosition =
                 //    new Vector3(part.AbsolutePosition.X, part.AbsolutePosition.Y, part.AbsolutePosition.Z);
@@ -1516,7 +1523,7 @@ namespace OpenSim.Region.Framework.Scenes
                 // Telling the prim to raytrace.
                 //EntityIntersection inter = part.TestIntersection(hRay, parentrotation);
 
-                EntityIntersection inter = part.TestIntersectionOBB(hRay, parentrotation, frontFacesOnly, faceCenters);
+                EntityIntersection inter = parts[i].TestIntersectionOBB(hRay, parentrotation, frontFacesOnly, faceCenters);
 
                 if (inter.HitTF)
                 {
@@ -1525,7 +1532,7 @@ namespace OpenSim.Region.Framework.Scenes
                     {
                         result.HitTF = true;
                         result.ipoint = inter.ipoint;
-                        result.obj = part;
+                        result.obj = parts[i];
                         result.normal = inter.normal;
                         result.distance = inter.distance;
 
@@ -1552,18 +1559,19 @@ namespace OpenSim.Region.Framework.Scenes
             minZ = float.MaxValue;
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            foreach (SceneObjectPart part in parts)
+            int nparts = parts.Length;
+            for (int i=0; i<nparts; i++)
             {
-                Vector3 worldPos = part.GetWorldPosition();
+                Vector3 worldPos = parts[i].GetWorldPosition();
                 Vector3 offset = worldPos - AbsolutePosition;
                 Quaternion worldRot;
-                if (part.ParentID == 0)
+                if (parts[i].ParentID == 0)
                 {
-                    worldRot = part.RotationOffset;
+                    worldRot = parts[i].RotationOffset;
                 }
                 else
                 {
-                    worldRot = part.GetWorldRotation();
+                    worldRot = parts[i].GetWorldRotation();
                 }
 
                 Vector3 frontTopLeft;
@@ -1580,39 +1588,41 @@ namespace OpenSim.Region.Framework.Scenes
 
                 Vector3 orig = Vector3.Zero;
 
-                frontTopLeft.X = orig.X - (part.Scale.X / 2);
-                frontTopLeft.Y = orig.Y - (part.Scale.Y / 2);
-                frontTopLeft.Z = orig.Z + (part.Scale.Z / 2);
+                float scaleX = parts[i].Scale.X;
+                float scaleY = parts[i].Scale.Y;
+                float scaleZ = parts[i].Scale.Z;
 
-                frontTopRight.X = orig.X - (part.Scale.X / 2);
-                frontTopRight.Y = orig.Y + (part.Scale.Y / 2);
-                frontTopRight.Z = orig.Z + (part.Scale.Z / 2);
+                frontTopLeft.X = orig.X - (scaleX / 2);
+                frontTopLeft.Y = orig.Y - (scaleY / 2);
+                frontTopLeft.Z = orig.Z + (scaleZ / 2);
 
-                frontBottomLeft.X = orig.X - (part.Scale.X / 2);
-                frontBottomLeft.Y = orig.Y - (part.Scale.Y / 2);
-                frontBottomLeft.Z = orig.Z - (part.Scale.Z / 2);
+                frontTopRight.X = orig.X - (scaleX / 2);
+                frontTopRight.Y = orig.Y + (scaleY / 2);
+                frontTopRight.Z = orig.Z + (scaleZ / 2);
 
-                frontBottomRight.X = orig.X - (part.Scale.X / 2);
-                frontBottomRight.Y = orig.Y + (part.Scale.Y / 2);
-                frontBottomRight.Z = orig.Z - (part.Scale.Z / 2);
+                frontBottomLeft.X = orig.X - (scaleX / 2);
+                frontBottomLeft.Y = orig.Y - (scaleY / 2);
+                frontBottomLeft.Z = orig.Z - (scaleZ / 2);
 
-                backTopLeft.X = orig.X + (part.Scale.X / 2);
-                backTopLeft.Y = orig.Y - (part.Scale.Y / 2);
-                backTopLeft.Z = orig.Z + (part.Scale.Z / 2);
+                frontBottomRight.X = orig.X - (scaleX / 2);
+                frontBottomRight.Y = orig.Y + (scaleY / 2);
+                frontBottomRight.Z = orig.Z - (scaleZ / 2);
 
-                backTopRight.X = orig.X + (part.Scale.X / 2);
-                backTopRight.Y = orig.Y + (part.Scale.Y / 2);
-                backTopRight.Z = orig.Z + (part.Scale.Z / 2);
+                backTopLeft.X = orig.X + (scaleX / 2);
+                backTopLeft.Y = orig.Y - (scaleY / 2);
+                backTopLeft.Z = orig.Z + (scaleZ / 2);
 
-                backBottomLeft.X = orig.X + (part.Scale.X / 2);
-                backBottomLeft.Y = orig.Y - (part.Scale.Y / 2);
-                backBottomLeft.Z = orig.Z - (part.Scale.Z / 2);
+                backTopRight.X = orig.X + (scaleX / 2);
+                backTopRight.Y = orig.Y + (scaleY / 2);
+                backTopRight.Z = orig.Z + (scaleZ / 2);
 
-                backBottomRight.X = orig.X + (part.Scale.X / 2);
-                backBottomRight.Y = orig.Y + (part.Scale.Y / 2);
-                backBottomRight.Z = orig.Z - (part.Scale.Z / 2);
+                backBottomLeft.X = orig.X + (scaleX / 2);
+                backBottomLeft.Y = orig.Y - (scaleY / 2);
+                backBottomLeft.Z = orig.Z - (scaleZ / 2);
 
-
+                backBottomRight.X = orig.X + (scaleX / 2);
+                backBottomRight.Y = orig.Y + (scaleY / 2);
+                backBottomRight.Z = orig.Z - (scaleZ / 2);
 
                 //m_log.InfoFormat("pre corner 1 is {0} {1} {2}", frontTopLeft.X, frontTopLeft.Y, frontTopLeft.Z);
                 //m_log.InfoFormat("pre corner 2 is {0} {1} {2}", frontTopRight.X, frontTopRight.Y, frontTopRight.Z);
@@ -1872,9 +1882,9 @@ namespace OpenSim.Region.Framework.Scenes
                     if(p.maxSimpleArea() > areaF)
                         areaF = p.maxSimpleArea();
                 }
-                if(parts.Length > 1)
+                if (nparts > 1)
                 {
-                    offset /= parts.Length; // basicly geometric center
+                    offset /= nparts; // basicly geometric center
                     offset = offset * RootPart.RotationOffset;
                 }
 
@@ -1909,8 +1919,6 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             int nparts = parts.Length;
-
-
             for (int i = 0; i < nparts; i++)
             {
                 p = parts[i];
@@ -1998,7 +2006,8 @@ namespace OpenSim.Region.Framework.Scenes
             Dictionary<UUID,string> states = new Dictionary<UUID,string>();
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 Dictionary<UUID, string> pstates = parts[i].Inventory.GetScriptStates(oldIDs);
                 foreach (KeyValuePair<UUID, string> kvp in pstates)
@@ -2144,7 +2153,8 @@ namespace OpenSim.Region.Framework.Scenes
         private void UpdateParentIDs()
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i<nparts; i++)
             {
                 SceneObjectPart part = parts[i];
                 if (part.UUID != m_rootPart.UUID)
@@ -2155,7 +2165,8 @@ namespace OpenSim.Region.Framework.Scenes
         public void RegenerateFullIDs()
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].UUID = UUID.Random();
         }
 
@@ -2197,11 +2208,11 @@ namespace OpenSim.Region.Framework.Scenes
             // do only what is supposed to do
             Vector3 groupPosition = m_rootPart.GroupPosition;
             SceneObjectPart[] parts = m_parts.GetArray();
-
-            foreach (SceneObjectPart part in parts)
+            int nparts = parts.Length;
+            for (int i=0; i<nparts; i++)
             {
-                if (part != m_rootPart)
-                    part.GroupPosition = groupPosition;
+                if (parts[i] != m_rootPart)
+                    parts[i].GroupPosition = groupPosition;
             }
         }
 
@@ -2263,7 +2274,8 @@ namespace OpenSim.Region.Framework.Scenes
                 return;
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 SceneObjectPart part = parts[i];
 
@@ -2316,14 +2328,14 @@ namespace OpenSim.Region.Framework.Scenes
             scriptEvents aggregateScriptEvents = 0;
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-                if (part == null)
+                if (parts[i] == null)
                     continue;
-                if (part != RootPart)
-                    part.Flags = objectflagupdate;
-                aggregateScriptEvents |= part.AggregateScriptEvents;
+                if (parts[i] != RootPart)
+                    parts[i].Flags = objectflagupdate;
+                aggregateScriptEvents |= parts[i].AggregateScriptEvents;
             }
 
             m_scriptListens_atTarget = ((aggregateScriptEvents & scriptEvents.at_target) != 0);
@@ -2350,12 +2362,11 @@ namespace OpenSim.Region.Framework.Scenes
             if (rootPartPhysEvents != lastRootPartPhysEvents)
             {
                 lastRootPartPhysEvents = rootPartPhysEvents;
-                for (int i = 0; i < parts.Length; i++)
+                for (int i = 0; i < nparts; i++)
                 {
-                    SceneObjectPart part = parts[i];
-                    if (part == null)
+                    if (parts[i] == null)
                         continue;
-                    part.UpdatePhysicsSubscribedEvents();
+                    parts[i].UpdatePhysicsSubscribedEvents();
                 }
             }
 
@@ -2380,18 +2391,18 @@ namespace OpenSim.Region.Framework.Scenes
         public void ApplyPhysics()
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            if (parts.Length > 1)
+            int nparts = parts.Length;
+            if (nparts > 1)
             {
                 ResetChildPrimPhysicsPositions();
 
                 // Apply physics to the root prim
                 m_rootPart.ApplyPhysics(m_rootPart.GetEffectiveObjectFlags(), m_rootPart.VolumeDetectActive, true);
 
-                for (int i = 0; i < parts.Length; i++)
+                for (int i = 0; i < nparts; i++)
                 {
-                    SceneObjectPart part = parts[i];
-                    if (part.LocalId != m_rootPart.LocalId)
-                        part.ApplyPhysics(m_rootPart.GetEffectiveObjectFlags(), part.VolumeDetectActive, true);
+                    if (parts[i].LocalId != m_rootPart.LocalId)
+                        parts[i].ApplyPhysics(m_rootPart.GetEffectiveObjectFlags(), parts[i].VolumeDetectActive, true);
                 }
                 // Hack to get the physics scene geometries in the right spot
 //                ResetChildPrimPhysicsPositions();
@@ -2408,21 +2419,22 @@ namespace OpenSim.Region.Framework.Scenes
 
         public void SetOwnerId(UUID userId)
         {
-                ForEachPart(delegate(SceneObjectPart part)
+            ForEachPart(delegate(SceneObjectPart part)
+            {
+                if (part.OwnerID != userId)
                 {
-                    if (part.OwnerID != userId)
-                    {
-                        if(part.GroupID != part.OwnerID)
-                            part.LastOwnerID = part.OwnerID;
-                        part.OwnerID = userId;
-                    }
-                });
+                    if(part.GroupID != part.OwnerID)
+                       part.LastOwnerID = part.OwnerID;
+                    part.OwnerID = userId;
+                }
+            });
         }
 
         public void ForEachPart(Action<SceneObjectPart> whatToDo)
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 whatToDo(parts[i]);
         }
 
@@ -2513,11 +2525,13 @@ namespace OpenSim.Region.Framework.Scenes
                             // Possible ghost prim
                             if (m_rootPart.PhysActor.Position != m_rootPart.GroupPosition)
                             {
-                                foreach (SceneObjectPart part in m_parts.GetArray())
+                                SceneObjectPart[] parts = m_parts.GetArray();
+                                int nparts = parts.Length;
+                                for (int i = 0; i < nparts; i++)
                                 {
                                     // Re-set physics actor positions and
                                     // orientations
-                                    part.GroupPosition = m_rootPart.GroupPosition;
+                                    parts[i].GroupPosition = m_rootPart.GroupPosition;
                                 }
                             }
                         }
@@ -2588,11 +2602,11 @@ namespace OpenSim.Region.Framework.Scenes
             RootPart.SendFullUpdate(remoteClient);
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-                if (part != RootPart)
-                    part.SendFullUpdate(remoteClient);
+                if (parts[i] != RootPart)
+                    parts[i].SendFullUpdate(remoteClient);
             }
         }
 
@@ -3046,11 +3060,11 @@ namespace OpenSim.Region.Framework.Scenes
             double now = Util.GetTimeStampMS();
             RootPart.SendScheduledUpdates(now);
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-                if(part != RootPart)
-                    part.SendScheduledUpdates(now);
+                if (parts[i] != RootPart)
+                    parts[i].SendScheduledUpdates(now);
             }
         }
 
@@ -3071,11 +3085,11 @@ namespace OpenSim.Region.Framework.Scenes
             RootPart.ScheduleFullUpdate();
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-                if (part != RootPart)
-                    part.ScheduleFullUpdate();
+                if (parts[i] != RootPart)
+                    parts[i].ScheduleFullUpdate();
             }
         }
 
@@ -3092,7 +3106,8 @@ namespace OpenSim.Region.Framework.Scenes
 //            m_log.DebugFormat("[SOG]: Scheduling terse update for {0} {1}", Name, UUID);
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].ScheduleTerseUpdate();
         }
 
@@ -3118,11 +3133,11 @@ namespace OpenSim.Region.Framework.Scenes
 
             RootPart.SendFullUpdateToAllClientsInternal();
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-                if (part != RootPart)
-                    part.SendFullUpdateToAllClientsInternal();
+                if (parts[i] != RootPart)
+                    parts[i].SendFullUpdateToAllClientsInternal();
             }
         }
 
@@ -3167,7 +3182,8 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].SendTerseUpdateToAllClientsInternal();
         }
 
@@ -3190,7 +3206,8 @@ namespace OpenSim.Region.Framework.Scenes
         public SceneObjectPart GetLinkNumPart(int linknum)
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 if (parts[i].LinkNum == linknum)
                     return parts[i];
@@ -3219,7 +3236,8 @@ namespace OpenSim.Region.Framework.Scenes
         public SceneObjectPart GetPart(uint localID)
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 if (parts[i].LocalId == localID)
                     return parts[i];
@@ -3345,7 +3363,6 @@ namespace OpenSim.Region.Framework.Scenes
             axPos *= Quaternion.Conjugate(parentRot);
             linkPart.OffsetPosition = axPos;
 
-
             // If there is only one SOP in a SOG, the LinkNum is zero. I.e., not a linkset.
             // Now that we know this SOG has at least two SOPs in it, the new root
             //    SOP becomes the first in the linkset.
@@ -3400,7 +3417,8 @@ namespace OpenSim.Region.Framework.Scenes
                         });
 
                 // Add each of the SOP's from the source linkset to our linkset
-                for (int i = 0; i < ogParts.Length; i++)
+                int nogParts = ogParts.Length;
+                for (int i = 0; i < nogParts; i++)
                 {
                     SceneObjectPart part = ogParts[i];
                     if (part.UUID != objectGroup.m_rootPart.UUID)

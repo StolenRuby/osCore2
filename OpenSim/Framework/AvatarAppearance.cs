@@ -1,4 +1,5 @@
-/*
+/* 6 august 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -401,7 +402,6 @@ namespace OpenSim.Framework
             }
             else
             {
-
                 for (int i = 0; i < newsize; i++)
                 {
                     if (visualParams[i] != m_visualparams[i])
@@ -621,10 +621,6 @@ namespace OpenSim.Framework
                 AvatarAttachment existingAttachment = GetAttachmentForItem(item);
                 if (existingAttachment != null)
                 {
-//                    m_log.DebugFormat(
-//                        "[AVATAR APPEARANCE]: Found existing attachment for {0}, asset {1} at point {2}",
-//                        existingAttachment.ItemID, existingAttachment.AssetID, existingAttachment.AttachPoint);
-
                     if (existingAttachment.AssetID != UUID.Zero && existingAttachment.AttachPoint == (attachpoint & 0x7F))
                     {
                         m_log.DebugFormat(
@@ -727,6 +723,22 @@ namespace OpenSim.Framework
 
         #region Packing Functions
 
+        internal OSDArray GetPackedAttachments()
+        {
+            lock (m_attachments)
+            {
+                OSDArray attachs = new OSDArray(m_attachments.Count);
+                foreach (KeyValuePair<int, List<AvatarAttachment>> kvp in m_attachments)
+                {
+                    foreach (AvatarAttachment attach in kvp.Value)
+                    {
+                        attachs.Add(attach.Pack());
+                    }
+                }
+                return attachs;
+            }
+        }
+
         /// <summary>
         /// Create an OSDMap from the appearance data
         /// </summary>
@@ -778,6 +790,11 @@ namespace OpenSim.Framework
             OSDBinary visualparams = new OSDBinary(m_visualparams);
             data["visualparams"] = visualparams;
 
+            // Possible deadlock situation in the original code.
+            // GetAttachments() already locks m_attachments AND
+            // what it returns is a copy of the attachments when
+            // all we need is a packed version. 
+            /*
             lock (m_attachments)
             {
                 // Attachments
@@ -786,6 +803,9 @@ namespace OpenSim.Framework
                     attachs.Add(attach.Pack());
                 data["attachments"] = attachs;
             }
+            */
+
+            data["attachments"] = GetPackedAttachments();
 
             return data;
         }

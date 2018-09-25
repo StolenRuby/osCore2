@@ -1,4 +1,5 @@
-/*
+/* 17 september 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -274,10 +275,10 @@ namespace OpenSim.Services.Connectors.Simulation
                 if (result["Success"].AsBoolean())
                     return true;
 
-                if(ctx.OutboundVersion < 0.2)
-                    result = WebUtil.PutToService(uri, args, timeout);			
-            
-	    	return result["Success"].AsBoolean();
+                if (ctx.OutboundVersion < 0.2)
+                    result = WebUtil.PutToService(uri, args, timeout);
+
+                return result["Success"].AsBoolean();
             }
             catch (Exception e)
             {

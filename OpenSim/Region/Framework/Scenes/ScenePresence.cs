@@ -1,4 +1,5 @@
-/*
+/* 23 June 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -77,6 +78,7 @@ namespace OpenSim.Region.Framework.Scenes
     public class ScenePresence : EntityBase, IScenePresence
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private static readonly String LogHeader = "[SCENE PRESENCE]";
 
 //        ~ScenePresence()
 //        {
@@ -272,6 +274,7 @@ namespace OpenSim.Region.Framework.Scenes
         private List<SceneObjectGroup> m_attachments = new List<SceneObjectGroup>();
 
         public Object AttachmentsSyncLock { get; private set; }
+        public Object AppearanceSyncLock { get; private set; }
 
         private Dictionary<UUID, ScriptControllers> scriptedcontrols = new Dictionary<UUID, ScriptControllers>();
         private ScriptControlled IgnoredControls = ScriptControlled.CONTROL_ZERO;
@@ -1054,6 +1057,7 @@ namespace OpenSim.Region.Framework.Scenes
         {
             m_scene = world;
             AttachmentsSyncLock = new Object();
+            AppearanceSyncLock = new Object();
             AllowMovement = true;
             IsChildAgent = true;
             IsLoggingIn = false;
@@ -1119,7 +1123,6 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             ControllingClient.RefreshGroupMembership();
-
         }
 
         private float lastHealthSent = 0;
@@ -1246,7 +1249,7 @@ namespace OpenSim.Region.Framework.Scenes
         // other uses need fix
         private bool MakeRootAgent(Vector3 pos, bool isFlying, ref Vector3 lookat)
         {
-            //int ts = Util.EnvironmentTickCount();
+            int ts = Util.EnvironmentTickCount();
 
             lock (m_completeMovementLock)
             {
@@ -1262,7 +1265,7 @@ namespace OpenSim.Region.Framework.Scenes
 
                 if (ParentUUID != UUID.Zero)
                 {
-                    m_log.DebugFormat("[SCENE PRESENCE]: Sitting avatar back on prim {0}", ParentUUID);
+                    //m_log.DebugFormat("[SCENE PRESENCE]: Sitting avatar back on prim {0}", ParentUUID);
                     SceneObjectPart part = m_scene.GetSceneObjectPart(ParentUUID);
                     if (part == null)
                     {
@@ -1324,8 +1327,8 @@ namespace OpenSim.Region.Framework.Scenes
                 else
                     success = CheckAndAdjustLandingPoint_SL(ref pos, ref lookat, ref positionChanged);
 
-                if (!success)
-                    m_log.DebugFormat("[SCENE PRESENCE MakeRootAgent]: houston we have a problem.. {0} ({1} got banned)", Name, UUID);
+                //if (!success)
+                //    m_log.DebugFormat("[SCENE PRESENCE MakeRootAgent]: houston we have a problem.. {0} ({1} got banned)", Name, UUID);
 
                 if (pos.X < 0f || pos.Y < 0f
                           || pos.X >= m_scene.RegionInfo.RegionSizeX
@@ -1481,18 +1484,32 @@ namespace OpenSim.Region.Framework.Scenes
             // But XEngine starts all scripts unsuspended.  Starting them suspended will not currently work because script rezzing
             // is placed in an asynchronous queue in XEngine and so the ResumeScripts() call will almost certainly execute before the
             // script is rezzed.  This means the ResumeScripts() does absolutely nothing when using XEngine.
-            List<SceneObjectGroup> attachments = GetAttachments();
-
-            m_log.DebugFormat(
-                "[SCENE PRESENCE]: Restarting scripts in {0} attachments for {1} in {2}", attachments.Count, Name, Scene.Name);
-
-            // Resume scripts
-            foreach (SceneObjectGroup sog in attachments)
+            Util.FireAndForget(delegate
             {
-                sog.ScheduleGroupForFullUpdate();
-                sog.RootPart.ParentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
-                sog.ResumeScripts();
-            }
+                try
+                {
+                    List<SceneObjectGroup> attachments = GetAttachments();
+
+                    //m_log.DebugFormat(
+                    //    "[SCENE PRESENCE]: Restarting scripts in {0} attachments for {1} in {2}", attachments.Count, Name, Scene.Name);
+
+                    // Resume scripts
+                    foreach (SceneObjectGroup sog in attachments)
+                    {
+                        try
+                        {
+                            sog.ScheduleGroupForFullUpdate();
+                            sog.RootPart.ParentGroup.CreateScriptInstances(0, false, m_scene.DefaultScriptEngine, GetStateSource());
+                            sog.ResumeScripts();
+                        }
+                        catch { }
+                    }
+                }
+                catch
+                {
+                    return;
+                }
+            }, null, "RestartAttachmentScripts", false);
         }
 
         private static bool IsRealLogin(TeleportFlags teleportFlags)
@@ -1533,7 +1550,6 @@ namespace OpenSim.Region.Framework.Scenes
 */
         public int GetStateSource()
         {
-/*
             AgentCircuitData aCircuit = m_scene.AuthenticateHandler.GetAgentCircuitData(UUID);
 
             if (aCircuit != null && (aCircuit.teleportFlags != (uint)TeleportFlags.Default))
@@ -1544,8 +1560,6 @@ namespace OpenSim.Region.Framework.Scenes
                 return 5; // StateSource.Teleporting
             }
             return 2; // StateSource.PrimCrossing
-*/
-            return m_teleportFlags == TeleportFlags.Default ? 2 : 5;
         }
 
         /// <summary>
@@ -1559,7 +1573,6 @@ namespace OpenSim.Region.Framework.Scenes
         /// </remarks>
         public void MakeChildAgent(ulong newRegionHandle)
         {
-            m_updateAgentReceivedAfterTransferEvent.Reset();
             haveGroupInformation = false;
             gotCrossUpdate = false;
             crossingFlags = 0;
@@ -1567,8 +1580,8 @@ namespace OpenSim.Region.Framework.Scenes
 
             RegionHandle = newRegionHandle;
 
-            m_log.DebugFormat("[SCENE PRESENCE]: Making {0} a child agent in {1} from root region {2}",
-                Name, Scene.RegionInfo.RegionName, newRegionHandle);
+            //m_log.DebugFormat("[SCENE PRESENCE]: Making {0} a child agent in {1} from root region {2}",
+            //    Name, Scene.RegionInfo.RegionName, newRegionHandle);
 
             // Reset the m_originRegionID as it has dual use as a flag to signal that the UpdateAgent() call orignating
             // from the source simulator has completed on a V2 teleport.
@@ -1980,7 +1993,7 @@ namespace OpenSim.Region.Framework.Scenes
 
             try
             {
-                if(m_updateAgentReceivedAfterTransferEvent.WaitOne(60000))
+                if(m_updateAgentReceivedAfterTransferEvent.WaitOne(10000))
                 {
                     UUID originID = UUID.Zero;
 
@@ -2001,10 +2014,6 @@ namespace OpenSim.Region.Framework.Scenes
                }
             }
             catch { }
-            finally
-            {
-                m_updateAgentReceivedAfterTransferEvent.Reset();
-            }
 
             return false;
         }
@@ -2085,9 +2094,9 @@ namespace OpenSim.Region.Framework.Scenes
 
                 if (!MakeRootAgent(AbsolutePosition, flying, ref look))
                 {
-                    m_log.DebugFormat(
-                        "[SCENE PRESENCE]: Aborting CompleteMovement call for {0} in {1} as they are already root",
-                        Name, Scene.Name);
+                    //m_log.DebugFormat(
+                    //    "[SCENE PRESENCE]: Aborting CompleteMovement call for {0} in {1} as they are already root",
+                    //    Name, Scene.Name);
 
                     return;
                 }
@@ -2109,7 +2118,7 @@ namespace OpenSim.Region.Framework.Scenes
                     else
                         COF = cof.ID;
 
-                    m_log.DebugFormat("[CompleteMovement]: Missing COF for {0} is {1}", client.AgentId, COF);
+                    //m_log.DebugFormat("[CompleteMovement]: Missing COF for {0} is {1}", client.AgentId, COF);
                 }
 
                 if (!string.IsNullOrEmpty(m_callbackURI))
@@ -2121,9 +2130,9 @@ namespace OpenSim.Region.Framework.Scenes
                     // region as the current region, meaning that a close sent before then will fail the teleport.
                     //                System.Threading.Thread.Sleep(2000);
 
-                    m_log.DebugFormat(
-                        "[SCENE PRESENCE]: Releasing {0} {1} with callback to {2}",
-                        client.Name, client.AgentId, m_callbackURI);
+                    //m_log.DebugFormat(
+                    //    "[SCENE PRESENCE]: Releasing {0} {1} with callback to {2}",
+                    //    client.Name, client.AgentId, m_callbackURI);
 
                     UUID originID;
 
@@ -2193,11 +2202,11 @@ namespace OpenSim.Region.Framework.Scenes
                     RotateToLookAt(look);
 
                 // HG
-                if(isHGTP)
-                {
+                //if(isHGTP)
+                //{
 //                    ControllingClient.SendNameReply(m_uuid, Firstname, Lastname);
-                    m_log.DebugFormat("[CompleteMovement] HG");
-                }
+                //    m_log.DebugFormat("[CompleteMovement] HG");
+                //}
 
                 m_previusParcelHide = false;
                 m_previusParcelUUID = UUID.Zero;
@@ -2291,8 +2300,8 @@ namespace OpenSim.Region.Framework.Scenes
                     {
                         if (m_attachments.Count > 0)
                         {
-//                            m_log.DebugFormat(
-//                                "[SCENE PRESENCE]: Restarting scripts in attachments for {0} in {1}", Name, Scene.Name);
+                            //m_log.DebugFormat(
+                            //    "[SCENE PRESENCE]: Restarting scripts in attachments for {0} in {1}", Name, Scene.Name);
 
                             foreach (SceneObjectGroup sog in m_attachments)
                             {
@@ -2332,6 +2341,9 @@ namespace OpenSim.Region.Framework.Scenes
                     m_lastChildAgentUpdateDrawDistance = DrawDistance;
                     m_lastChildAgentUpdatePosition = AbsolutePosition;
                     m_childUpdatesBusy = false; // allow them
+
+                    // Lets queue another send, just in case
+                    m_scene.AvatarFactory.QueueAppearanceSend(UUID);
                 }
 
                 //m_log.DebugFormat("[CompleteMovement] openChildAgents: {0}ms", Util.EnvironmentTickCountSubtract(ts));
@@ -2359,7 +2371,6 @@ namespace OpenSim.Region.Framework.Scenes
                             friendsModule.SendFriendsOnlineIfNeeded(ControllingClient);
                     }
                     //m_log.DebugFormat("[CompleteMovement] friendsModule: {0}ms",    Util.EnvironmentTickCountSubtract(ts));
-
                 }
             }
             finally
@@ -2372,7 +2383,7 @@ namespace OpenSim.Region.Framework.Scenes
  
             m_scene.EventManager.OnRegionHeartbeatEnd += RegionHeartbeatEnd;
 
-            m_log.DebugFormat("[CompleteMovement] end: {0}ms", Util.EnvironmentTickCountSubtract(ts));
+            //m_log.DebugFormat("[CompleteMovement] end: {0}ms", Util.EnvironmentTickCountSubtract(ts));
         }
 
         /// <summary>
@@ -3042,7 +3053,7 @@ namespace OpenSim.Region.Framework.Scenes
             catch (Exception e)
             {
                 //Avoid system crash, can be slower but...
-                m_log.DebugFormat("Crash! {0}", e.ToString());
+                //m_log.DebugFormat("Crash! {0}", e.ToString());
             }
 
             return updated;
@@ -4078,22 +4089,19 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             m_lastSize = Appearance.AvatarSize;
-            int count = 0;
-
-            m_scene.ForEachScenePresence(delegate(ScenePresence scenePresence)
+            int count = m_scene.ForEachScenePresenceCount(delegate(ScenePresence scenePresence)
             {
                 SendAvatarDataToAgent(scenePresence);
-                count++;
             });
 
             m_scene.StatsReporter.AddAgentUpdates(count);
         }
+
         // sends avatar object to all clients so they cross it into region
         // then sends kills to hide
         public void SendInitialAvatarDataToAllAgents(List<ScenePresence> presences)
         {
             m_lastSize = Appearance.AvatarSize;
-            int count = 0;
             foreach (ScenePresence p in presences)
             {
                 p.ControllingClient.SendEntityFullUpdateImmediate(this);
@@ -4102,9 +4110,8 @@ namespace OpenSim.Region.Framework.Scenes
                     // p.ControllingClient.SendKillObject(new List<uint> {LocalId});
                     // or also attachments viewer may still know about
                     SendKillTo(p);
-                count++;
             }
-            m_scene.StatsReporter.AddAgentUpdates(count);
+            m_scene.StatsReporter.AddAgentUpdates(presences.Count);
         }
 
         public void SendInitialAvatarDataToAgent(ScenePresence p)
@@ -4134,6 +4141,37 @@ namespace OpenSim.Region.Framework.Scenes
              avatar.ControllingClient.SendEntityFullUpdateImmediate(this);
         }
 
+        public void SendAllOtherAppearancesToMe()
+        {
+            // only send update from root agents to other clients; children are only "listening posts"
+            if (IsChildAgent)
+            {
+                m_log.WarnFormat(
+                    "[SCENE PRESENCE]: Attempt to send avatar data from a child agent for {0} in {1}",
+                    Name, Scene.RegionInfo.RegionName);
+
+                return;
+            }
+
+            List<ScenePresence> presences = m_scene.GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
+            {
+                try
+                {
+                    if (presences[i].IsChildAgent || presences[i].UUID == this.UUID)
+                    {
+                        continue;
+                    }
+
+                    // Send the found presences to the caller (this).
+                    presences[i].SendAppearanceToAgent(this);
+                }
+                catch (Exception e)
+                {
+                }
+            }
+        }
+
         /// <summary>
         /// Send this agent's appearance to all other root and child agents in the scene
         /// This agent must be root.
@@ -4152,16 +4190,16 @@ namespace OpenSim.Region.Framework.Scenes
                 return;
             }
 
-            int count = 0;
-            m_scene.ForEachScenePresence(delegate(ScenePresence scenePresence)
+            int count = m_scene.ForEachScenePresenceCount(delegate(ScenePresence scenePresence)
             {
                 // only send information to other root agents
                 if (scenePresence.UUID == UUID)
                     return;
 
                 SendAppearanceToAgent(scenePresence);
-                count++;
             });
+
+            // Am not too worried about count being +1.
             m_scene.StatsReporter.AddAgentUpdates(count);
         }
 
@@ -4499,9 +4537,9 @@ namespace OpenSim.Region.Framework.Scenes
 
             uint newRegionX, newRegionY;
             List<ulong> knownRegions = KnownRegionHandles;
-            m_log.DebugFormat(
-                "[SCENE PRESENCE]: Closing child agents. Checking {0} regions in {1}",
-                knownRegions.Count, Scene.RegionInfo.RegionName);
+            //m_log.DebugFormat(
+            //    "[SCENE PRESENCE]: Closing child agents. Checking {0} regions in {1}",
+            //    knownRegions.Count, Scene.RegionInfo.RegionName);
 
             Util.RegionHandleToRegionLoc(newRegionHandle, out newRegionX, out newRegionY);
             uint x, y;
@@ -4614,12 +4652,11 @@ namespace OpenSim.Region.Framework.Scenes
 
         public void UpdateChildAgent(AgentData cAgentData)
         {
-            m_log.Debug("   >>> ChildAgentDataUpdate <<< " + Scene.RegionInfo.RegionName);
+//            m_log.Debug("   >>> ChildAgentDataUpdate <<< " + Scene.RegionInfo.RegionName);
             if (!IsChildAgent)
                 return;
 
             CopyFrom(cAgentData);
-            m_log.Debug("   >>> ChildAgentDataUpdate SetEvent<<< ");
             m_updateAgentReceivedAfterTransferEvent.Set();
         }
 
@@ -5719,7 +5756,6 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 IgnoredControls = ScriptControlled.CONTROL_ZERO;
                 obj.eventControls = (ScriptControlled)controls;
-                obj.ignoreControls = ScriptControlled.CONTROL_ZERO;
             }
 
             lock (scriptedcontrols)

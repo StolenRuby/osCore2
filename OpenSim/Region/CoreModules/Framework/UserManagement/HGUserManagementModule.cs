@@ -1,4 +1,5 @@
-/*
+/* 30 Jun 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -116,46 +117,56 @@ namespace OpenSim.Region.CoreModules.Framework.UserManagement
                     string[] names = words[0].Split(new char[] { '.' });
                     if (names.Length >= 2)
                     {
-
                         string uriStr = "http://" + words[1];
-                        // Let's check that the last name is a valid address
-                        try
-                        {
-                            new Uri(uriStr);
-                        }
-                        catch (UriFormatException)
-                        {
-                            m_log.DebugFormat("[USER MANAGEMENT MODULE]: Malformed address {0}", uriStr);
-                            return;
-                        }
 
-                        UserAgentServiceConnector uasConn = new UserAgentServiceConnector(uriStr);
+                        // Lets do this in a thread. Added thread safety to
+                        // DNS Lookup used in UserAgentServiceConnector.
+                        Util.FireAndForget(delegate
+                        {
+                            // Let's check that the last name is a valid address
+                            try
+                            {
+                                new Uri(uriStr);
+                            }
+                            catch (UriFormatException)
+                            {
+                                m_log.DebugFormat("[USER MANAGEMENT MODULE]: Malformed address {0}", uriStr);
+                                return;
+                            }
 
-                        UUID userID = UUID.Zero;
-                        try
-                        {
-                            userID = uasConn.GetUUID(names[0], names[1]);
-                        }
-                        catch (Exception e)
-                        {
-                            m_log.Debug("[USER MANAGEMENT MODULE]: GetUUID call failed ", e);
-                        }
+                            UserAgentServiceConnector uasConn = new UserAgentServiceConnector(uriStr);
+                            
+                            UUID userID = UUID.Zero;
+                            try
+                            {
+                                userID = uasConn.GetUUID(names[0], names[1]);
+                            }
+                            catch (Exception e)
+                            {
+                                m_log.Debug("[USER MANAGEMENT MODULE]: GetUUID call failed ", e);
+                                userID = UUID.Zero;
+                            }
 
-                        if (!userID.Equals(UUID.Zero))
-                        {
-                            UserData ud = new UserData();
-                            ud.Id = userID;
-                            ud.FirstName = words[0];
-                            ud.LastName = "@" + words[1];
-                            users.Add(ud);
-                            // WARNING! that uriStr is not quite right... it may be missing the / at the end,
-                            // which will cause trouble (duplicate entries on some tables). We should
-                            // get the UUI instead from the UAS. TO BE FIXED.
-                            AddUser(userID, names[0], names[1], uriStr);
-                            m_log.DebugFormat("[USER MANAGEMENT MODULE]: User {0}@{1} found", words[0], words[1]);
-                        }
-                        else
-                            m_log.DebugFormat("[USER MANAGEMENT MODULE]: User {0}@{1} not found", words[0], words[1]);
+                            if (!userID.Equals(UUID.Zero))
+                            {
+                                UserData ud = new UserData();
+                                ud.Id = userID;
+                                ud.FirstName = words[0];
+                                ud.LastName = "@" + words[1];
+                                users.Add(ud);
+                                // WARNING! that uriStr is not quite right... it may be missing the / at the end,
+                                // which will cause trouble (duplicate entries on some tables). We should
+                                // get the UUI instead from the UAS. TO BE FIXED. So... lets fix it.
+                                if (!uriStr.EndsWith("/"))
+                                {
+                                    uriStr = uriStr + "/";
+                                }
+                                AddUser(userID, names[0], names[1], uriStr);
+                                m_log.DebugFormat("[USER MANAGEMENT MODULE]: User {0}@{1} found", words[0], words[1]);
+                            }
+                            else
+                                m_log.DebugFormat("[USER MANAGEMENT MODULE]: User {0}@{1} not found", words[0], words[1]);
+                        }, null, "AddAdditionalHGUsers", false);
                     }
                 }
             }

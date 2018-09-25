@@ -1,4 +1,5 @@
-/*
+/* 23 june 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -48,7 +49,8 @@ namespace OpenSim.Region.Framework.Scenes
         public void ForceInventoryPersistence()
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].Inventory.ForceInventoryPersistence();
         }
 
@@ -77,7 +79,8 @@ namespace OpenSim.Region.Framework.Scenes
             if (!m_scene.RegionInfo.RegionSettings.DisableScripts)
             {
                 SceneObjectPart[] parts = m_parts.GetArray();
-                for (int i = 0; i < parts.Length; i++)
+                int nparts = parts.Length;
+                for (int i = 0; i < nparts; i++)
                     scriptsStarted
                         += parts[i].Inventory.CreateScriptInstances(startParam, postOnRez, engine, stateSource);
             }
@@ -91,7 +94,8 @@ namespace OpenSim.Region.Framework.Scenes
         public void RemoveScriptInstances(bool sceneObjectBeingDeleted)
         {
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].Inventory.RemoveScriptInstances(sceneObjectBeingDeleted);
         }
 
@@ -185,7 +189,6 @@ namespace OpenSim.Region.Framework.Scenes
             part.Inventory.AddInventoryItem(taskItem, addFromAllowedDrop);
             part.ParentGroup.InvalidateEffectivePerms();
             return true;
-
         }
 
         /// <summary>
@@ -353,7 +356,8 @@ namespace OpenSim.Region.Framework.Scenes
                 // date is time of writing april 30th 2017
                 bool newobj = (RootPart.CreationDate == 0 || RootPart.CreationDate > 1493574994);
                 SceneObjectPart[] parts = m_parts.GetArray();
-                for (int i = 0; i < parts.Length; i++)
+                int nparts = parts.Length;
+                for (int i = 0; i < nparts; i++)
                 {
                     SceneObjectPart part = parts[i];
 
@@ -442,11 +446,11 @@ namespace OpenSim.Region.Framework.Scenes
             uint ownerMask = RootPart.OwnerMask;
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
-                SceneObjectPart part = parts[i];
-                ownerMask &= part.BaseMask;
-                perms &= part.Inventory.MaskEffectivePermissions();
+                ownerMask &= parts[i].BaseMask;
+                perms &= parts[i].Inventory.MaskEffectivePermissions();
             }
 
             if ((ownerMask & (uint)PermissionMask.Modify) == 0)
@@ -466,7 +470,8 @@ namespace OpenSim.Region.Framework.Scenes
 //            m_log.DebugFormat("[PRIM INVENTORY]: Applying next owner permissions to {0} {1}", Name, UUID);
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].ApplyNextOwnerPermissions();
         }
 
@@ -475,7 +480,8 @@ namespace OpenSim.Region.Framework.Scenes
             Dictionary<UUID, string> states = new Dictionary<UUID, string>();
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
             {
                 SceneObjectPart part = parts[i];
                 foreach (KeyValuePair<UUID, string> s in part.Inventory.GetScriptStates())
@@ -496,7 +502,6 @@ namespace OpenSim.Region.Framework.Scenes
 
             xmldoc.AppendChild(rootElement);
 
-
             XmlElement wrapper = xmldoc.CreateElement("", "ScriptStates",
                     String.Empty);
 
@@ -505,6 +510,7 @@ namespace OpenSim.Region.Framework.Scenes
             foreach (KeyValuePair<UUID, string> state in states)
             {
                 XmlDocument sdoc = new XmlDocument();
+                sdoc.XmlResolver=null;
                 sdoc.LoadXml(state.Value);
                 XmlNodeList rootL = sdoc.GetElementsByTagName("State");
                 XmlNode rootNode = rootL[0];
@@ -540,6 +546,7 @@ namespace OpenSim.Region.Framework.Scenes
                 return;
 
             XmlDocument doc = new XmlDocument();
+            doc.XmlResolver=null;
             try
             {
                 doc.LoadXml(objXMLData);
@@ -582,7 +589,8 @@ namespace OpenSim.Region.Framework.Scenes
                 return;
 
             SceneObjectPart[] parts = m_parts.GetArray();
-            for (int i = 0; i < parts.Length; i++)
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
                 parts[i].Inventory.ResumeScripts();
         }
 
@@ -592,9 +600,13 @@ namespace OpenSim.Region.Framework.Scenes
         /// <returns></returns>
         public bool ContainsScripts()
         {
-            foreach (SceneObjectPart part in Parts)
-                if (part.Inventory.ContainsScripts())
+            SceneObjectPart[] parts = m_parts.GetArray();
+            int nparts = parts.Length;
+            for (int i = 0; i < nparts; i++)
+            {
+                if (parts[i].Inventory.ContainsScripts())
                     return true;
+            }
 
             return false;
         }

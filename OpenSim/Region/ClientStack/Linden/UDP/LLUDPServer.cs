@@ -1,4 +1,5 @@
-/*
+/* 8 August 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -27,7 +28,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -286,7 +286,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
         /// <summary>Incoming packets that are awaiting handling</summary>
         //protected OpenMetaverse.BlockingQueue<IncomingPacket> packetInbox = new OpenMetaverse.BlockingQueue<IncomingPacket>();
 
-        protected BlockingCollection<IncomingPacket> packetInbox = new BlockingCollection<IncomingPacket>();
+        protected OpenSim.Framework.BlockingQueue<IncomingPacket> packetInbox = new OpenSim.Framework.BlockingQueue<IncomingPacket>();
 
         /// <summary>Bandwidth throttle for this UDP server</summary>
         public TokenBucket Throttle { get; protected set; }
@@ -713,7 +713,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
                     scene.Name,
                     StatType.Pull,
                     MeasuresOfInterest.AverageChangeOverTime,
-                    stat => {try{stat.Value = packetInbox.Count;}catch{}},
+                    stat => stat.Value = packetInbox.Count(),
                     StatVerbosity.Debug));
 
             // XXX: These stats are also pool stats but we register them separately since they are currently not
@@ -899,7 +899,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
             if (packet.Type == PacketType.CoarseLocationUpdate && allowSplitting)
                 allowSplitting = false;
 
-//            bool packetQueued = false;
+            bool packetQueued = false;
 
             if (allowSplitting && packet.HasVariableBlocks)
             {
@@ -912,17 +912,15 @@ namespace OpenSim.Region.ClientStack.LindenUDP
                 for (int i = 0; i < packetCount; i++)
                 {
                     byte[] data = datas[i];
-//                    if (!SendPacketData(udpClient, data, packet.Type, category, method))
-//                        packetQueued = true;
-                    SendPacketData(udpClient, data, packet.Type, category, method);
+                    if (!SendPacketData(udpClient, data, packet.Type, category, method))
+                        packetQueued = true;
                 }
             }
             else
             {
                 byte[] data = packet.ToBytes();
-//                if (!SendPacketData(udpClient, data, packet.Type, category, method))
-//                    packetQueued = true;
-                SendPacketData(udpClient, data, packet.Type, category, method);
+                if (!SendPacketData(udpClient, data, packet.Type, category, method))
+                    packetQueued = true;
             }
 
             PacketPool.Instance.ReturnPacket(packet);
@@ -1547,11 +1545,10 @@ namespace OpenSim.Region.ClientStack.LindenUDP
 
 //            if (incomingPacket.Packet.Type == PacketType.AgentUpdate ||
 //                incomingPacket.Packet.Type == PacketType.ChatFromViewer)
-//            if (incomingPacket.Packet.Type == PacketType.ChatFromViewer)
-//                packetInbox.PriorityEnqueue(incomingPacket);
-//            else
-//                packetInbox.Enqueue(incomingPacket);
-            packetInbox.Add(incomingPacket);
+            if (incomingPacket.Packet.Type == PacketType.ChatFromViewer)
+                packetInbox.PriorityEnqueue(incomingPacket);
+            else
+                packetInbox.Enqueue(incomingPacket);
 
         }
 
@@ -1940,12 +1937,20 @@ namespace OpenSim.Region.ClientStack.LindenUDP
         {
             IClientAPI client = null;
             bool createNew = false;
+            
+            AgentCircuitData aCircuit = m_circuitManager.GetAgentCircuitData(circuitCode);
 
             // We currently synchronize this code across the whole scene to avoid issues such as
             // http://opensimulator.org/mantis/view.php?id=5365  However, once locking per agent circuit can be done
-            // consistently, this lock could probably be removed.
-            lock (this)
+            // consistently, this lock could probably be removed:
+            // lock (this)
+            // Nani: so why not just lock the circuit...
+            bool setLock = (aCircuit != null);
+            try
             {
+                if (setLock)
+                    Monitor.Enter(aCircuit);
+
                 if (!Scene.TryGetClient(agentID, out client))
                 {
                     createNew = true;
@@ -1972,6 +1977,11 @@ namespace OpenSim.Region.ClientStack.LindenUDP
 
                     client.Start();
                 }
+            }
+            finally
+            {
+                if (setLock)
+                    Monitor.Exit(aCircuit);
             }
 
             return client;
@@ -2020,7 +2030,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
                 Scene.ThreadAlive(1);
                 try
                 {
-                    packetInbox.TryTake(out incomingPacket, 250);
+                    incomingPacket = packetInbox.Dequeue(250);
 
                     if (incomingPacket != null && IsRunningInbound)
                     {
@@ -2042,9 +2052,9 @@ namespace OpenSim.Region.ClientStack.LindenUDP
                 Watchdog.UpdateThread();
             }
 
-            if (packetInbox.Count > 0)
-                m_log.Warn("[LLUDPSERVER]: IncomingPacketHandler is shutting down, dropping " + packetInbox.Count + " packets");
-            packetInbox.Dispose();
+            if (packetInbox.Count() > 0)
+                m_log.Warn("[LLUDPSERVER]: IncomingPacketHandler is shutting down, dropping " + packetInbox.Count() + " packets");
+            packetInbox.Clear();
 
             Watchdog.RemoveThread();
         }

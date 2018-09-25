@@ -1,4 +1,5 @@
-/*
+/* 8 September 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -188,8 +189,12 @@ namespace OpenSim.Framework
         public void ForEach(Action<IClientAPI> action)
         {
             IClientAPI[] localArray = m_array;
-            for (int i = 0; i < localArray.Length; i++)
-                action(localArray[i]);
+
+            //for (int i = 0; i < localArray.Length; i++)
+            //    action(localArray[i]);
+
+            // Avoid using the Metaverse version of Parallel, use the pure .Net version.
+            System.Threading.Tasks.Parallel.ForEach<IClientAPI>(localArray, action);
         }
     }
 }

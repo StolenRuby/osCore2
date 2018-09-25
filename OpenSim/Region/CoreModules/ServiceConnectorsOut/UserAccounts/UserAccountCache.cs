@@ -1,4 +1,5 @@
-/*
+/* 15 MAR 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -36,9 +37,9 @@ namespace OpenSim.Region.CoreModules.ServiceConnectorsOut.UserAccounts
 {
     public class UserAccountCache : IUserAccountCacheModule
     {
-        private const double CACHE_ALIEN_EXPIRATION_SECONDS = 172800; // 48 hours
+        private const double CACHE_ALIEN_EXPIRATION_SECONDS = 7200.0; // 2 hours // 172800; // 48 hours
         private const double CACHE_EXPIRATION_SECONDS = 3600.0; // 1 hour!
-        private const double CACHE_NULL_EXPIRATION_SECONDS = 600; // 10minutes
+        private const double CACHE_NULL_EXPIRATION_SECONDS = 600; // 10 minutes
 
 //        private static readonly ILog m_log =
 //                LogManager.GetLogger(

@@ -1,4 +1,5 @@
-/*
+/* 3 sept 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -76,14 +77,19 @@ namespace OpenSim.Region.Framework.Scenes
             int scriptsValidForStarting = 0;
 
             EntityBase[] entities = Entities.GetEntities();
-            foreach (EntityBase group in entities)
+            int nentities = entities.Length;
+            for (int i=0; i<nentities; i++)
             {
-                if (group is SceneObjectGroup)
+                try
                 {
-                    scriptsValidForStarting
-                        += ((SceneObjectGroup) group).CreateScriptInstances(0, false, DefaultScriptEngine, 0);
-                    ((SceneObjectGroup) group).ResumeScripts();
+                    if (entities[i] is SceneObjectGroup)
+                    {
+                        scriptsValidForStarting
+                            += ((SceneObjectGroup)entities[i]).CreateScriptInstances(0, false, DefaultScriptEngine, 0);
+                        ((SceneObjectGroup)entities[i]).ResumeScripts();
+                    }
                 }
+                catch { }
             }
 
             m_log.InfoFormat(
@@ -101,9 +107,15 @@ namespace OpenSim.Region.Framework.Scenes
 //            m_log.InfoFormat("[SCENE]: Starting scripts in {0}, please wait.", RegionInfo.RegionName);
 
             IScriptModule[] engines = RequestModuleInterfaces<IScriptModule>();
-
-            foreach (IScriptModule engine in engines)
-                engine.StartProcessing();
+            int nengines = engines.Length;
+            for (int i=0; i<nengines; i++)
+            {
+                try
+                {
+                    engines[i].StartProcessing();
+                }
+                catch { }
+            }
         }
 
         public void AddUploadedInventoryItem(UUID agentID, InventoryItemBase item, uint cost)
@@ -773,7 +785,6 @@ namespace OpenSim.Region.Framework.Scenes
                 else
                 {
                     InventoryFolderBase root = InventoryService.GetRootFolder(recipient);
-
                     if (root != null)
                     {
                         itemCopy.Folder = root.ID;
@@ -918,33 +929,33 @@ namespace OpenSim.Region.Framework.Scenes
                 }
 
 
-            if (remoteClient.AgentId == oldAgentID
+                if (remoteClient.AgentId == oldAgentID
                 || (LibraryService != null
                     && LibraryService.LibraryRootFolder != null
                     && oldAgentID == LibraryService.LibraryRootFolder.Owner))
-            {
-                CreateNewInventoryItem(
-                    remoteClient, item.CreatorId, item.CreatorData, newFolderID,
-                    newName, item.Description, item.Flags, callbackID, item.AssetID, (sbyte)item.AssetType, (sbyte)item.InvType,
-                    item.BasePermissions, item.CurrentPermissions, item.EveryOnePermissions,
-                    item.NextPermissions, item.GroupPermissions, Util.UnixTimeSinceEpoch(), false);
-            }
-            else
-            {
-                // If item is transfer or permissions are off or calling agent is allowed to copy item owner's inventory item.
-                if (((item.CurrentPermissions & (uint)PermissionMask.Transfer) != 0)
-                    && (m_permissions.BypassPermissions()
-                        || m_permissions.CanCopyUserInventory(remoteClient.AgentId, oldItemID)))
                 {
                     CreateNewInventoryItem(
-                        remoteClient, item.CreatorId, item.CreatorData, newFolderID, newName, item.Description, item.Flags, callbackID,
-                        item.AssetID, (sbyte)item.AssetType, (sbyte) item.InvType,
-                        item.NextPermissions, item.NextPermissions, item.EveryOnePermissions & item.NextPermissions,
+                        remoteClient, item.CreatorId, item.CreatorData, newFolderID,
+                        newName, item.Description, item.Flags, callbackID, item.AssetID, (sbyte)item.AssetType, (sbyte)item.InvType,
+                        item.BasePermissions, item.CurrentPermissions, item.EveryOnePermissions,
                         item.NextPermissions, item.GroupPermissions, Util.UnixTimeSinceEpoch(), false);
                 }
+                else
+                {
+                    // If item is transfer or permissions are off or calling agent is allowed to copy item owner's inventory item.
+                    if (((item.CurrentPermissions & (uint)PermissionMask.Transfer) != 0)
+                        && (m_permissions.BypassPermissions()
+                            || m_permissions.CanCopyUserInventory(remoteClient.AgentId, oldItemID)))
+                    {
+                        CreateNewInventoryItem(
+                            remoteClient, item.CreatorId, item.CreatorData, newFolderID, newName, item.Description, item.Flags, callbackID,
+                            item.AssetID, (sbyte)item.AssetType, (sbyte)item.InvType,
+                            item.NextPermissions, item.NextPermissions, item.EveryOnePermissions & item.NextPermissions,
+                            item.NextPermissions, item.GroupPermissions, Util.UnixTimeSinceEpoch(), false);
+                    }
+                }
             }
-        }
-                      else
+            else
             {
                 m_log.ErrorFormat(
                     "[AGENT INVENTORY]: Could not copy item {0} since asset {1} could not be found",
@@ -1249,7 +1260,6 @@ namespace OpenSim.Region.Framework.Scenes
             }
 
             InventoryItemBase agentItem = new InventoryItemBase();
-
             agentItem.ID = UUID.Random();
             agentItem.CreatorId = taskItem.CreatorID.ToString();
             agentItem.CreatorData = taskItem.CreatorData;
@@ -1622,13 +1632,25 @@ namespace OpenSim.Region.Framework.Scenes
                             // We don't need to send the folder if source and destination of the link are in the same
                             // folder.
                             if (linkedItem.Folder != containingFolder.ID)
-                                linkedItemFolderIdsToSend.Add(linkedItem.Folder);
+                            {
+                                // The lovely thing about HashSet.Add() is that it returns
+                                // false when the object was already in the HashSet.
+                                // So to avoid sending a linked item twice, you do not
+                                // have to wait for the complete HashSet and then loop
+                                // through it. You just have to check the result of the Add.
+                                if (linkedItemFolderIdsToSend.Add(linkedItem.Folder))
+                                {
+                                    SendInventoryUpdate(client, new InventoryFolderBase(linkedItem.Folder), false, true);
+                                }
+                            }
                         }
                     }
                 }
 
-                foreach (UUID linkedItemFolderId in linkedItemFolderIdsToSend)
-                    SendInventoryUpdate(client, new InventoryFolderBase(linkedItemFolderId), false, true);
+                //// So this used to loop through the resulting Hashset, but since HashSet.Add() returns
+                //// false when the element exists already, you do not have to wait for the complete HashSet.
+                //  foreach (UUID linkedItemFolderId in linkedItemFolderIdsToSend)
+                //    SendInventoryUpdate(client, new InventoryFolderBase(linkedItemFolderId), false, true);
 
                 client.SendInventoryFolderDetails(
                     client.AgentId, folder.ID, contents.Items, contents.Folders,
@@ -2389,7 +2411,7 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 using (XmlTextReader wrappedReader = new XmlTextReader(xmlData, XmlNodeType.Element, null))
                 {
-                    using (XmlReader reader = XmlReader.Create(wrappedReader, new XmlReaderSettings() { IgnoreWhitespace = true, ConformanceLevel = ConformanceLevel.Fragment}))
+                    using (XmlReader reader = XmlReader.Create(wrappedReader, new XmlReaderSettings() { IgnoreWhitespace = true, ConformanceLevel = ConformanceLevel.Fragment, ProhibitDtd = true }))
                     {
                         reader.Read();
                         bool isSingleObject = reader.Name != "CoalescedObject";
@@ -2420,6 +2442,7 @@ namespace OpenSim.Region.Framework.Scenes
                         else
                         {
                             XmlDocument doc = new XmlDocument();
+                            doc.XmlResolver=null;
                             doc.LoadXml(xmlData);
                             XmlElement e = (XmlElement)doc.SelectSingleNode("/CoalescedObject");
                             XmlElement coll = (XmlElement)e;
@@ -2730,11 +2753,11 @@ namespace OpenSim.Region.Framework.Scenes
                     sog.ScheduleGroupForFullUpdate();
 
                     SceneObjectPart[] partList = sog.Parts;
-
-                    foreach (SceneObjectPart child in partList)
+                    int nparts = partList.Length;
+                    for (int i=0; i<nparts; i++)
                     {
-                        child.Inventory.ChangeInventoryOwner(ownerID);
-                        child.TriggerScriptChangedEvent(Changed.OWNER);
+                        partList[i].Inventory.ChangeInventoryOwner(ownerID);
+                        partList[i].TriggerScriptChangedEvent(Changed.OWNER);
                     }
                 }
                 else // The object deeded to the group
@@ -2757,10 +2780,11 @@ namespace OpenSim.Region.Framework.Scenes
                     sog.ScheduleGroupForFullUpdate();
 
                     SceneObjectPart[] partList = sog.Parts;
-                    foreach (SceneObjectPart child in partList)
+                    int nparts = partList.Length;
+                    for (int i = 0; i<nparts; i++)
                     {
-                        child.Inventory.ChangeInventoryOwner(groupID);
-                        child.TriggerScriptChangedEvent(Changed.OWNER);
+                        partList[i].Inventory.ChangeInventoryOwner(groupID);
+                        partList[i].TriggerScriptChangedEvent(Changed.OWNER);
                     }
                 }
             }

@@ -1,4 +1,5 @@
-/*
+/* 5 September 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -29,13 +30,11 @@ using log4net;
 using System;
 using System.Threading;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Reflection;
 using System.Timers;
 using Nini.Config;
 using OpenSim.Framework;
-using OpenSim.Framework.Monitoring;
 using OpenSim.Services.Interfaces;
 using OpenMetaverse;
 
@@ -59,6 +58,7 @@ namespace OpenSim.Services.Connectors
 
         private delegate void AssetRetrievedEx(AssetBase asset);
 
+
         // Keeps track of concurrent requests for the same asset, so that it's only loaded once.
         // Maps: Asset ID -> Handlers which will be called when the asset has been loaded
 //        private Dictionary<string, AssetRetrievedEx> m_AssetHandlers = new Dictionary<string, AssetRetrievedEx>();
@@ -67,7 +67,9 @@ namespace OpenSim.Services.Connectors
 
         private Dictionary<string, string> m_UriMap = new Dictionary<string, string>();
 
-        private Thread[] m_fetchThreads;
+//        private Thread[] m_fetchThreads;
+
+        private System.Threading.Timer[] m_fetchThreads = new System.Threading.Timer[4] { null, null, null, null };
 
         public int MaxAssetRequestConcurrency
         {
@@ -77,6 +79,7 @@ namespace OpenSim.Services.Connectors
 
         public AssetServicesConnector()
         {
+
         }
 
         public AssetServicesConnector(string serverURI)
@@ -89,6 +92,18 @@ namespace OpenSim.Services.Connectors
         {
             Initialise(source);
         }
+
+        ~AssetServicesConnector()
+        {
+            // Lets make sure the threads get killed off.
+            try
+            {
+                m_running = false;
+                m_signal.Set();
+            }
+            catch { }
+        }
+
 
         public virtual void Initialise(IConfigSource source)
         {
@@ -132,15 +147,11 @@ namespace OpenSim.Services.Connectors
                 //m_log.DebugFormat("[ASSET]: Using {0} for prefix {1}", groupHost, prefix);
             }
 
-            m_fetchThreads = new Thread[2];
-
-            for (int i = 0 ; i < 2 ; i++)
+            for (int i = 0 ; i < 4 ; i++)
             {
-                m_fetchThreads[i] = WorkManager.StartThread(AssetRequestProcessor,
-                            String.Format("GetTextureWorker{0}", i),
-                            ThreadPriority.Normal,
-                            true,
-                            false);
+                m_fetchThreads[i] = new System.Threading.Timer(
+                                           delegate { AssetRequestProcessor(); },
+                                           null, 0, Timeout.Infinite);
             }
         }
 
@@ -267,7 +278,6 @@ namespace OpenSim.Services.Connectors
 
                 asset = SynchronousRestObjectRequester.MakeRequest<int, AssetBase>("GET", uri, 0, m_Auth);
 
-
                 if (m_Cache != null)
                 {
                     if (asset != null)
@@ -347,59 +357,86 @@ namespace OpenSim.Services.Connectors
             }
         }
 
-        private class QueuedAssetRequest
+        private struct QueuedAssetRequest
         {
             public string uri;
             public string id;
         }
 
-        private BlockingCollection<QueuedAssetRequest> m_requestQueue = new BlockingCollection<QueuedAssetRequest>();
+        private Queue<QueuedAssetRequest> m_requestQueue = new Queue<QueuedAssetRequest>();
+        private ManualResetEvent m_signal = new ManualResetEvent(true);
+        private volatile bool m_running = true;
 
         private void AssetRequestProcessor()
         {
-            QueuedAssetRequest r;
-
-            while (true)
+            QueuedAssetRequest r = new QueuedAssetRequest() { uri=string.Empty, id=string.Empty };
+            while (m_running)
             {
-                if(!m_requestQueue.TryTake(out r, 4500) || r == null)
-                {
-                    Watchdog.UpdateThread();
-                    continue;
-                }
-
-                Watchdog.UpdateThread();
-                string uri = r.uri;
-                string id = r.id;
-
                 try
                 {
-                    AssetBase a = SynchronousRestObjectRequester.MakeRequest<int, AssetBase>("GET", uri, 0, 30000, m_Auth);
-
-                    if (a != null && m_Cache != null)
-                        m_Cache.Cache(a);
-
-                    List<AssetRetrievedEx> handlers;
-                    lock (m_AssetHandlers)
+                    bool wait = false;
+                    lock (m_requestQueue)
                     {
-                        handlers = m_AssetHandlers[id];
-                        m_AssetHandlers.Remove(id);
-                    }
-
-                    if(handlers != null)
-                    {
-                        Util.FireAndForget(x =>
+                        if (m_requestQueue.Count > 0)
                         {
-                            foreach (AssetRetrievedEx h in handlers)
-                            {
-                                try { h.Invoke(a); }
-                                catch { }
-                            }
-                            handlers.Clear();
-                        });
+                            r = m_requestQueue.Dequeue();
+                            m_signal.Set();
+                        }
+                        else
+                        {
+                            // Reset flag to wait for a new requests.
+                            m_signal.Reset();
+                            wait = true;
+                        }
                     }
+
+                    try
+                    {
+                        if (wait)
+                        {
+                            m_signal.WaitOne();
+                        }
+                        else
+                        {                            
+                            AssetBase a = SynchronousRestObjectRequester.MakeRequest<int, AssetBase>("GET", r.uri, 0, 30000, m_Auth);
+
+                            if (a != null && m_Cache != null)
+                                m_Cache.Cache(a);
+
+                            List<AssetRetrievedEx> handlers;
+                            lock (m_AssetHandlers)
+                            {
+                                handlers = m_AssetHandlers[r.id];
+                                m_AssetHandlers.Remove(r.id);
+                            }
+
+                            if (handlers != null)
+                            {
+                                Util.FireAndForget(x =>
+                                {
+                                    foreach (AssetRetrievedEx h in handlers)
+                                    {
+                                        try { h.Invoke(a); }
+                                        catch { }
+                                    }
+                                    handlers.Clear();
+                                });
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // Make sure the thread stays awake while there are requests.
+                    m_signal.Set();
                 }
                 catch { }
             }
+            // exiting the thread now
+            try
+            {
+                m_signal.Set(); // Wake other threads as well so they will end.
+            }
+            catch { }
         }
 
         public bool Get(string id, Object sender, AssetRetrieved handler)
@@ -435,7 +472,12 @@ namespace OpenSim.Services.Connectors
                     QueuedAssetRequest request = new QueuedAssetRequest();
                     request.id = id;
                     request.uri = uri;
-                    m_requestQueue.Add(request);
+
+                    lock (m_requestQueue)
+                    {
+                        m_requestQueue.Enqueue(request);
+                        m_signal.Set();
+                    }
                 }
             }
             else

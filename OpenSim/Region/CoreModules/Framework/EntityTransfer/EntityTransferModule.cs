@@ -1,4 +1,5 @@
-/*
+/* 3 Jun 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -490,31 +491,33 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             if (sp.Flying)
                 teleportFlags |= (uint)TeleportFlags.IsFlying;
 
-            m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.Transferring);
-
-            sp.ControllingClient.SendTeleportStart(teleportFlags);
-            lookAt.Z = 0f;
-
-            if(Math.Abs(lookAt.X) < 0.01f && Math.Abs(lookAt.Y) < 0.01f)
+            if (m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.Transferring))
             {
-                lookAt.X = 1.0f;
-                lookAt.Y = 0;
+
+                sp.ControllingClient.SendTeleportStart(teleportFlags);
+                lookAt.Z = 0f;
+
+                if (Math.Abs(lookAt.X) < 0.01f && Math.Abs(lookAt.Y) < 0.01f)
+                {
+                    lookAt.X = 1.0f;
+                    lookAt.Y = 0;
+                }
+
+                sp.ControllingClient.SendLocalTeleport(position, lookAt, teleportFlags);
+                sp.TeleportFlags = (Constants.TeleportFlags)teleportFlags;
+                sp.RotateToLookAt(lookAt);
+                sp.Velocity = Vector3.Zero;
+                sp.Teleport(position);
+
+                m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.ReceivedAtDestination);
+
+                foreach (SceneObjectGroup grp in sp.GetAttachments())
+                {
+                    sp.Scene.EventManager.TriggerOnScriptChangedEvent(grp.LocalId, (uint)Changed.TELEPORT);
+                }
             }
 
-            sp.ControllingClient.SendLocalTeleport(position, lookAt, teleportFlags);
-            sp.TeleportFlags = (Constants.TeleportFlags)teleportFlags;
-            sp.RotateToLookAt(lookAt);
-            sp.Velocity = Vector3.Zero;
-            sp.Teleport(position);
-
-            m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.ReceivedAtDestination);
-
-            foreach (SceneObjectGroup grp in sp.GetAttachments())
-            {
-                sp.Scene.EventManager.TriggerOnScriptChangedEvent(grp.LocalId, (uint)Changed.TELEPORT);
-            }
-
-            m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.CleaningUp);
+            m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.CleaningUp);            
         }
 
         /// <summary>
@@ -902,7 +905,12 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             }
 
             // Past this point we have to attempt clean up if the teleport fails, so update transfer state.
-            m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.Transferring);
+            if (!m_entityTransferStateMachine.UpdateInTransit(sp.UUID, AgentTransferState.Transferring))
+            {
+                m_interRegionTeleportCancels.Value++;
+                sp.IsInTransit = false;
+                return;
+            }
 
             // OK, it got this agent. Let's close some child agents
 
@@ -1479,9 +1487,9 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
 
         // Given a position relative to the current region and outside of it
-        // find the new region that the point is actually in
-        // returns 'null' if new region not found or if agent as no access
-        // else also returns new target position in the new region local coords
+        // find the new region that the point is actually in.
+        // returns 'null' if new region not found or if information
+        // and new position relative to it
         // now only works for crossings
 
         public GridRegion GetDestination(Scene scene, UUID agentID, Vector3 pos,
@@ -1500,7 +1508,8 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
             // Call the grid service to lookup the region containing the new position.
             GridRegion neighbourRegion = GetRegionContainingWorldLocation(
                                 scene.GridService, scene.RegionInfo.ScopeID,
-                                presenceWorldX, presenceWorldY);
+                                presenceWorldX, presenceWorldY,
+                                Math.Max(scene.RegionInfo.RegionSizeX, scene.RegionInfo.RegionSizeY));
 
             if (neighbourRegion == null)
                 return null;
@@ -2276,46 +2285,68 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
         protected GridRegion GetRegionContainingWorldLocation(IGridService pGridService, UUID pScopeID, double px, double py)
         {
-         // Given a world position, get the GridRegion info for
-         //   the region containing that point.
-         // for compatibility with old grids it does a scan to find large regions
-         // 0.9 grids to that
+            // Since we don't know how big the regions could be, we have to search a very large area
+            //    to find possible regions.
+            return GetRegionContainingWorldLocation(pGridService, pScopeID, px, py, Constants.MaximumRegionSize);
+        }
+
+        // Given a world position, get the GridRegion info for
+        //   the region containing that point.
+        // for compatibility with old grids it does a scan to find large regions
+        // 0.9 grids to that
+
+        protected GridRegion GetRegionContainingWorldLocation(IGridService pGridService, UUID pScopeID,
+                            double px, double py, uint pSizeHint)
+        {
 //            m_log.DebugFormat("{0} GetRegionContainingWorldLocation: call, XY=<{1},{2}>", LogHeader, px, py);
             GridRegion ret = null;
 
-            // check if we already found it does not exist
             if (m_notFoundLocationCache.Contains(px, py))
+            {
+//                m_log.DebugFormat("{0} GetRegionContainingWorldLocation: Not found via cache. loc=<{1},{2}>", LogHeader, px, py);
                 return null;
+            }
 
-            // reduce to next grid corner
+            // As an optimization, since most regions will be legacy sized regions (256x256), first try to get
+            //   the region at the appropriate legacy region location.
             // this is all that is needed on 0.9 grids
             uint possibleX = (uint)px & 0xffffff00u;
             uint possibleY = (uint)py & 0xffffff00u;
             ret = pGridService.GetRegionByPosition(pScopeID, (int)possibleX, (int)possibleY);
             if (ret != null)
+            {
+//                m_log.DebugFormat("{0} GetRegionContainingWorldLocation: Found region using legacy size. rloc=<{1},{2}>. Rname={3}",
+//                                    LogHeader, possibleX, possibleY, ret.RegionName);
                 return ret;
- 
+            }
+
             // for 0.8 regions just make a BIG area request. old code whould do it plus 4 more smaller on region open edges
             // this is what 0.9 grids now do internally
             List<GridRegion> possibleRegions = pGridService.GetRegionRange(pScopeID,
                         (int)(px - Constants.MaximumRegionSize), (int)(px + 1), // +1 bc left mb not part of range
                         (int)(py - Constants.MaximumRegionSize), (int)(py + 1));
+//          m_log.DebugFormat("{0} GetRegionContainingWorldLocation: possibleRegions cnt={1}, range={2}",
+//                       LogHeader, possibleRegions.Count, range);
             if (possibleRegions != null && possibleRegions.Count > 0)
             {
                 // If we found some regions, check to see if the point is within
                 foreach (GridRegion gr in possibleRegions)
                 {
+//                  m_log.DebugFormat("{0} GetRegionContainingWorldLocation: possibleRegion nm={1}, regionLoc=<{2},{3}>, regionSize=<{4},{5}>",
+//                               LogHeader, gr.RegionName, gr.RegionLocX, gr.RegionLocY, gr.RegionSizeX, gr.RegionSizeY);
                     if (px >= (double)gr.RegionLocX && px < (double)(gr.RegionLocX + gr.RegionSizeX)
                                 && py >= (double)gr.RegionLocY && py < (double)(gr.RegionLocY + gr.RegionSizeY))
                     {
                         // Found a region that contains the point
                         return gr;
+//                      m_log.DebugFormat("{0} GetRegionContainingWorldLocation: found. RegionName={1}", LogHeader, ret.RegionName);
                     }
                 }
             }
 
             // remember this location was not found so we can quickly not find it next time
             m_notFoundLocationCache.Add(px, py);
+//          m_log.DebugFormat("{0} GetRegionContainingWorldLocation: Not found. Remembering loc=<{1},{2}>", LogHeader, px, py);
             return null;
         }
 
@@ -2339,6 +2370,7 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
         private void InformClientOfNeighbourAsync(ScenePresence sp, AgentCircuitData agentCircData, GridRegion reg,
                                                   IPEndPoint endPoint, bool newAgent)
         {
+
             if (newAgent)
             {
                 // we may already had lost this sp
@@ -2411,7 +2443,7 @@ namespace OpenSim.Region.CoreModules.Framework.EntityTransfer
 
             uint dd = (uint)avatar.RegionViewDistance;
 
-            // until avatar movement updates client connections, we need to send at least this current region immediate neighbors
+            // until avatar movement updates client connections, we need to seend at least this current region imediate neighbors
             uint ddX = Math.Max(dd, Constants.RegionSize);
             uint ddY = Math.Max(dd, Constants.RegionSize);
 

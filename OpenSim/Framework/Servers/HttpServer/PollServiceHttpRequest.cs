@@ -1,4 +1,5 @@
-﻿/*
+﻿/* 17 September 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -47,10 +48,8 @@ namespace OpenSim.Framework.Servers.HttpServer
         public readonly UUID RequestID;
         public int  contextHash;
 
-/*
         private void GenContextHash()
         {
-
             Random rnd = new Random();
             contextHash = 0;
             if (Request.Headers["remote_addr"] != null)
@@ -64,9 +63,8 @@ namespace OpenSim.Framework.Servers.HttpServer
             }
             else
                 contextHash += rnd.Next() & 0xffff;
-
         }
-*/
+
         public PollServiceHttpRequest(
             PollServiceEventArgs pPollServiceArgs, IHttpClientContext pHttpContext, IHttpRequest pRequest)
         {
@@ -75,8 +73,7 @@ namespace OpenSim.Framework.Servers.HttpServer
             Request = pRequest;
             RequestTime = System.Environment.TickCount;
             RequestID = UUID.Random();
-//            GenContextHash();
-            contextHash = HttpContext.contextID;
+            GenContextHash();
         }
 
         internal void DoHTTPGruntWork(BaseHttpServer server, Hashtable responsedata)
@@ -92,23 +89,25 @@ namespace OpenSim.Framework.Servers.HttpServer
             response.SendChunked = false;
             response.ContentLength64 = buffer.Length;
             response.ContentEncoding = Encoding.UTF8;
+            response.ReuseContext = false;
 
             try
             {
                 response.OutputStream.Write(buffer, 0, buffer.Length);
+                response.OutputStream.Flush();
                 response.Send();
                 buffer = null;
             }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                // This is "connection reset by peer", meaning the
+                // requesting server has given up. They need to
+                // fix their timeouts. We don't want to spam the
+                // log with this.
+            }
             catch (Exception ex)
             {
-                if(ex is System.Net.Sockets.SocketException)
-                {
-                    // only mute connection reset by peer so we are not totally blind for now
-                    if(((System.Net.Sockets.SocketException)ex).SocketErrorCode != System.Net.Sockets.SocketError.ConnectionReset)
-                         m_log.Warn("[POLL SERVICE WORKER THREAD]: Error ", ex);
-                }
-                else
-                    m_log.Warn("[POLL SERVICE WORKER THREAD]: Error ", ex);
+                m_log.Warn("[POLL SERVICE WORKER THREAD]: Error ", ex);
             }
 
             PollServiceArgs.RequestsHandled++;
@@ -122,19 +121,38 @@ namespace OpenSim.Framework.Servers.HttpServer
             if(Request.Body.CanRead)
                 Request.Body.Dispose();
 
+            response.SendChunked = false;
             response.ContentLength64 = 0;
             response.ContentEncoding = Encoding.UTF8;
+            response.ReuseContext = false;
             response.KeepAlive = false;
             response.SendChunked = false;
             response.StatusCode = 503;
 
             try
             {
+                response.OutputStream.Flush();
                 response.Send();
             }
-            catch
+            catch (Exception e)
             {
             }
+        }
+    }
+
+    class PollServiceHttpRequestComparer : IEqualityComparer<PollServiceHttpRequest>
+    {
+        public bool Equals(PollServiceHttpRequest b1, PollServiceHttpRequest b2)
+        {
+            if (b1.contextHash != b2.contextHash)
+                return false;
+            bool b = Object.ReferenceEquals(b1.HttpContext, b2.HttpContext);
+            return b;
+        }
+
+        public int GetHashCode(PollServiceHttpRequest b2)
+        {
+            return (int)b2.contextHash;
         }
     }
 }

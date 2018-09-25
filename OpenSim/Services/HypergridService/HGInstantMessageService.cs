@@ -1,4 +1,5 @@
-/*
+/* 15 mar 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -54,7 +55,7 @@ namespace OpenSim.Services.HypergridService
                 LogManager.GetLogger(
                 MethodBase.GetCurrentMethod().DeclaringType);
 
-        private const double CACHE_EXPIRATION_SECONDS = 120000.0; // 33 hours
+        private const double CACHE_EXPIRATION_SECONDS = 1800.0;  // 30 min // 120000.0; // 33 hours
 
         static bool m_Initialized = false;
 

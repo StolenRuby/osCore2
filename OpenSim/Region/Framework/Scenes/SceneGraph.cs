@@ -1,4 +1,5 @@
-/*
+/* 25 May 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -68,7 +69,11 @@ namespace OpenSim.Region.Framework.Scenes
 
         #region Fields
 
-        protected OpenMetaverse.ReaderWriterLockSlim m_scenePresencesLock = new OpenMetaverse.ReaderWriterLockSlim();
+        // What is the point of using a ReaderWriterLock when all you use it for is WRITING?!
+        // protected OpenMetaverse.ReaderWriterLockSlim m_scenePresencesLock = new OpenMetaverse.ReaderWriterLockSlim();
+        // Lets use a nice simple lock() instead.
+        protected Object m_scenePresencesLock = new Object();
+
         protected Dictionary<UUID, ScenePresence> m_scenePresenceMap = new Dictionary<UUID, ScenePresence>();
         protected List<ScenePresence> m_scenePresenceArray = new List<ScenePresence>();
 
@@ -144,17 +149,13 @@ namespace OpenSim.Region.Framework.Scenes
 
         protected internal void Close()
         {
-            m_scenePresencesLock.EnterWriteLock();
-            try
+            Dictionary<UUID, ScenePresence> newmap = new Dictionary<UUID, ScenePresence>();
+            List<ScenePresence> newlist = new List<ScenePresence>();
+
+            lock (m_scenePresencesLock)
             {
-                Dictionary<UUID, ScenePresence> newmap = new Dictionary<UUID, ScenePresence>();
-                List<ScenePresence> newlist = new List<ScenePresence>();
                 m_scenePresenceMap = newmap;
                 m_scenePresenceArray = newlist;
-            }
-            finally
-            {
-                m_scenePresencesLock.ExitWriteLock();
             }
 
             lock (SceneObjectGroupsByFullID)
@@ -191,10 +192,15 @@ namespace OpenSim.Region.Framework.Scenes
         /// </remarks>
         protected internal void UpdatePresences()
         {
-            ForEachScenePresence(delegate(ScenePresence presence)
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
             {
-                presence.Update();
-            });
+                try
+                {
+                    presences[i].Update();
+                }
+                catch { }
+            }
         }
 
         /// <summary>
@@ -231,12 +237,17 @@ namespace OpenSim.Region.Framework.Scenes
 
         protected internal void UpdateScenePresenceMovement()
         {
-            ForEachScenePresence(delegate(ScenePresence presence)
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
             {
-                presence.UpdateMovement();
-            });
+                try
+                {
+                    presences[i].UpdateMovement();
+                }
+                catch { }
+            }
         }
-
+        
         public void GetCoarseLocations(out List<Vector3> coarseLocations, out List<UUID> avatarUUIDs, uint maxLocations)
         {
             coarseLocations = new List<Vector3>();
@@ -271,6 +282,56 @@ namespace OpenSim.Region.Framework.Scenes
                 avatarUUIDs.Add(sp.UUID);
             }
         }
+
+        public void SendCoarseLocations(uint maxLocations)
+        {
+            List<Vector3> coarseLocations = new List<Vector3>();
+            List<UUID> avatarUUIDs = new List<UUID>();
+
+            // coarse locations are sent as BYTE, so limited to the 255m max of normal regions
+            // try to work around that scale down X and Y acording to region size, so reducing the resolution
+            //
+            // viewers need to scale up
+            float scaleX = (float)m_parentScene.RegionInfo.RegionSizeX / (float)Constants.RegionSize;
+            if (scaleX == 0)
+                scaleX = 1.0f;
+            scaleX = 1.0f / scaleX;
+            float scaleY = (float)m_parentScene.RegionInfo.RegionSizeY / (float)Constants.RegionSize;
+            if (scaleY == 0)
+                scaleY = 1.0f;
+            scaleY = 1.0f / scaleY;
+
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < Math.Min(presences.Count, maxLocations); ++i)
+            {
+                try
+                {
+                    // If this presence is a child agent, we don't want its coarse locations
+                    if (presences[i].IsChildAgent)
+                        continue;
+                    Vector3 pos = presences[i].AbsolutePosition;
+                    pos.X *= scaleX;
+                    pos.Y *= scaleY;
+
+                    coarseLocations.Add(pos);
+                    avatarUUIDs.Add(presences[i].UUID);
+                }
+                catch { }
+            }
+
+            // yes we pretend nobody left inbetween these 2 loops:
+            for (int i = 0; i < presences.Count; ++i)
+            {
+                try
+                {
+                    presences[i].SendCoarseLocations(coarseLocations, avatarUUIDs);
+                }
+                catch { }
+            }
+        }
+
+
+
 
         #endregion
 
@@ -325,11 +386,12 @@ namespace OpenSim.Region.Framework.Scenes
                 SceneObjectPart rootpart = sceneObject.RootPart;
                 rootpart.GroupPosition = npos;
 
-                foreach (SceneObjectPart part in sceneObject.Parts)
+                SceneObjectPart[] parts = sceneObject.Parts;
+                for(int i=0; i<parts.Length; i++)
                 {
-                    if (part == rootpart)
+                    if (parts[i] == rootpart)
                         continue;
-                    part.GroupPosition = npos;
+                    parts[i].GroupPosition = npos;
                 }
                 rootpart.Velocity = Vector3.Zero;
                 rootpart.AngularVelocity = Vector3.Zero;
@@ -361,7 +423,6 @@ namespace OpenSim.Region.Framework.Scenes
         /// </returns>
         protected internal bool AddNewSceneObject(SceneObjectGroup sceneObject, bool attachToBackup, bool sendClientUpdates)
         {
-
             bool ret = AddSceneObject(sceneObject, attachToBackup, sendClientUpdates);
 
            // Ensure that we persist this new scene object if it's not an
@@ -459,35 +520,7 @@ namespace OpenSim.Region.Framework.Scenes
 //                sceneObject.Name, sceneObject.UUID, sceneObject.Parts.Length, m_parentScene.RegionInfo.RegionName);
 
             SceneObjectPart[] parts = sceneObject.Parts;
-
-            // Clamp the sizes (scales) of the child prims and add the child prims to the count of all primitives
-            // (meshes and geometric primitives) in the scene; add child prims to m_numTotalPrim count
-            if (m_parentScene.m_clampPrimSize)
-            {
-                foreach (SceneObjectPart part in parts)
-                {
-                    Vector3 scale = part.Shape.Scale;
-
-                    scale.X = Util.Clamp(scale.X, m_parentScene.m_minNonphys, m_parentScene.m_maxNonphys);
-                    scale.Y = Util.Clamp(scale.Y, m_parentScene.m_minNonphys, m_parentScene.m_maxNonphys);
-                    scale.Z = Util.Clamp(scale.Z, m_parentScene.m_minNonphys, m_parentScene.m_maxNonphys);
-
-                    part.Shape.Scale = scale;
-                }
-            }
             m_numTotalPrim += parts.Length;
-
-            // Go through all parts (geometric primitives and meshes) of this Scene Object
-            foreach (SceneObjectPart part in parts)
-            {
-                // Keep track of the total number of meshes or geometric primitives now in the scene;
-                // determine which object this is based on its primitive type: sculpted (sculpt) prim refers to
-                // a mesh and all other prims (i.e. box, sphere, etc) are geometric primitives
-                if (part.GetPrimType() == PrimType.SCULPT)
-                    m_numMesh++;
-                else
-                    m_numPrim++;
-            }
 
             sceneObject.AttachToScene(m_parentScene);
 
@@ -496,13 +529,56 @@ namespace OpenSim.Region.Framework.Scenes
             lock (SceneObjectGroupsByFullID)
                 SceneObjectGroupsByFullID[sceneObject.UUID] = sceneObject;
 
-            foreach (SceneObjectPart part in parts)
-            {
-                lock (SceneObjectGroupsByFullPartID)
-                    SceneObjectGroupsByFullPartID[part.UUID] = sceneObject;
+            // The code used to loop through all parts 3x, now only once.
 
-                lock (SceneObjectGroupsByLocalPartID)
-                    SceneObjectGroupsByLocalPartID[part.LocalId] = sceneObject;
+            // Clamp the sizes (scales) of the child prims and add the child prims to the count of all primitives
+            // (meshes and geometric primitives) in the scene; add child prims to m_numTotalPrim count
+            if (m_parentScene.m_clampPrimSize)
+            {
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    Vector3 scale = parts[i].Shape.Scale;
+
+                    scale.X = Util.Clamp(scale.X, m_parentScene.m_minNonphys, m_parentScene.m_maxNonphys);
+                    scale.Y = Util.Clamp(scale.Y, m_parentScene.m_minNonphys, m_parentScene.m_maxNonphys);
+                    scale.Z = Util.Clamp(scale.Z, m_parentScene.m_minNonphys, m_parentScene.m_maxNonphys);
+
+                    parts[i].Shape.Scale = scale;
+
+                    // Keep track of the total number of meshes or geometric primitives now in the scene;
+                    // determine which object this is based on its primitive type: sculpted (sculpt) prim refers to
+                    // a mesh and all other prims (i.e. box, sphere, etc) are geometric primitives
+                    if (parts[i].GetPrimType() == PrimType.SCULPT)
+                        m_numMesh++;
+                    else
+                        m_numPrim++;
+
+                    lock (SceneObjectGroupsByFullPartID)
+                        SceneObjectGroupsByFullPartID[parts[i].UUID] = sceneObject;
+
+                    lock (SceneObjectGroupsByLocalPartID)
+                        SceneObjectGroupsByLocalPartID[parts[i].LocalId] = sceneObject;
+                }
+            }
+            else // let us save some loops by not running throught parts more than once.
+            {
+                // Go through all parts (geometric primitives and meshes) again?? of this Scene Object
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    // Keep track of the total number of meshes or geometric primitives now in the scene;
+                    // determine which object this is based on its primitive type: sculpted (sculpt) prim refers to
+                    // a mesh and all other prims (i.e. box, sphere, etc) are geometric primitives
+                    if (parts[i].GetPrimType() == PrimType.SCULPT)
+                        m_numMesh++;
+                    else
+                        m_numPrim++;
+
+                    lock (SceneObjectGroupsByFullPartID)
+                        SceneObjectGroupsByFullPartID[parts[i].UUID] = sceneObject;
+
+                    lock (SceneObjectGroupsByLocalPartID)
+                        SceneObjectGroupsByLocalPartID[parts[i].LocalId] = sceneObject;
+                }
             }
 
             if (sendClientUpdates)
@@ -552,17 +628,18 @@ namespace OpenSim.Region.Framework.Scenes
                 bool isPh = (grp.RootPart.Flags & PrimFlags.Physics) == PrimFlags.Physics;
                 int nphysparts = 0;
                 // Go through all parts (primitives and meshes) of this Scene Object
-                foreach (SceneObjectPart part in grp.Parts)
+                SceneObjectPart[] partArray = grp.Parts;
+                for (int i = 0; i < partArray.Length; i++)
                 {
                     // Keep track of the total number of meshes or geometric primitives left in the scene;
                     // determine which object this is based on its primitive type: sculpted (sculpt) prim refers to
                     // a mesh and all other prims (i.e. box, sphere, etc) are geometric primitives
-                    if (part.GetPrimType() == PrimType.SCULPT)
+                    if (partArray[i].GetPrimType() == PrimType.SCULPT)
                         m_numMesh--;
                     else
                         m_numPrim--;
 
-                    if(isPh && part.PhysicsShapeType != (byte)PhysShapeType.none)
+                    if(isPh && partArray[i].PhysicsShapeType != (byte)PhysShapeType.none)
                         nphysparts++;
                 }
 
@@ -715,36 +792,22 @@ namespace OpenSim.Region.Framework.Scenes
 
             Entities[presence.UUID] = presence;
 
-            m_scenePresencesLock.EnterWriteLock();
-            try
+            lock (m_scenePresencesLock) 
             {
                 m_numChildAgents++;
 
                 Dictionary<UUID, ScenePresence> newmap = new Dictionary<UUID, ScenePresence>(m_scenePresenceMap);
-                List<ScenePresence> newlist = new List<ScenePresence>(m_scenePresenceArray);
 
-                if (!newmap.ContainsKey(presence.UUID))
-                {
-                    newmap.Add(presence.UUID, presence);
-                    newlist.Add(presence);
-                }
-                else
-                {
-                    // Remember the old presence reference from the dictionary
-                    ScenePresence oldref = newmap[presence.UUID];
-                    // Replace the presence reference in the dictionary with the new value
-                    newmap[presence.UUID] = presence;
-                    // Find the index in the list where the old ref was stored and update the reference
-                    newlist[newlist.IndexOf(oldref)] = presence;
-                }
+                // This will add or replace the presence for this UUID to the map.
+                newmap[presence.UUID] = presence;
 
                 // Swap out the dictionary and list with new references
                 m_scenePresenceMap = newmap;
+
+                // The map contains all presences so we can just make this list based
+                // on those.
+                List<ScenePresence> newlist = new List<ScenePresence>(newmap.Values);
                 m_scenePresenceArray = newlist;
-            }
-            finally
-            {
-                m_scenePresencesLock.ExitWriteLock();
             }
 
             return presence;
@@ -762,33 +825,26 @@ namespace OpenSim.Region.Framework.Scenes
                     agentID);
             }
 
-            m_scenePresencesLock.EnterWriteLock();
-            try
+            lock (m_scenePresencesLock)
             {
                 Dictionary<UUID, ScenePresence> newmap = new Dictionary<UUID, ScenePresence>(m_scenePresenceMap);
-                List<ScenePresence> newlist = new List<ScenePresence>(m_scenePresenceArray);
 
                 // Remove the presence reference from the dictionary
-                if (newmap.ContainsKey(agentID))
+                if (newmap.Remove(agentID))
                 {
-                    ScenePresence oldref = newmap[agentID];
-                    newmap.Remove(agentID);
-
-                    // Find the index in the list where the old ref was stored and remove the reference
-                    newlist.RemoveAt(newlist.IndexOf(oldref));
                     // Swap out the dictionary and list with new references
                     m_scenePresenceMap = newmap;
+
+                    // The map contains all presences so we can just make this list based
+                    // on those.
+                    List<ScenePresence> newlist = new List<ScenePresence>(newmap.Values);
                     m_scenePresenceArray = newlist;
-                }
-                else
-                {
-                    m_log.WarnFormat("[SCENE GRAPH]: Tried to remove non-existent scene presence with agent ID {0} from scene ScenePresences list", agentID);
+
+                    return; // success
                 }
             }
-            finally
-            {
-                m_scenePresencesLock.ExitWriteLock();
-            }
+
+            m_log.WarnFormat("[SCENE GRAPH]: Tried to remove non-existent scene presence with agent ID {0} from scene ScenePresences list", agentID);
         }
 
         protected internal void SwapRootChildAgent(bool direction_RC_CR_T_F)
@@ -822,13 +878,18 @@ namespace OpenSim.Region.Framework.Scenes
             int rootcount = 0;
             int childcount = 0;
 
-            ForEachScenePresence(delegate(ScenePresence presence)
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
             {
-                if (presence.IsChildAgent)
-                    ++childcount;
-                else
-                    ++rootcount;
-            });
+                try
+                {
+                    if (presences[i].IsChildAgent)
+                        ++childcount;
+                    else
+                        ++rootcount;
+                }
+                catch { }
+            }
 
             m_numRootAgents = rootcount;
             m_numChildAgents = childcount;
@@ -939,11 +1000,15 @@ namespace OpenSim.Region.Framework.Scenes
         protected internal ScenePresence GetScenePresence(string firstName, string lastName)
         {
             List<ScenePresence> presences = GetScenePresences();
-            foreach (ScenePresence presence in presences)
+            for (int i = 0; i < presences.Count; ++i)
             {
-                if (string.Equals(presence.Firstname, firstName, StringComparison.CurrentCultureIgnoreCase)
-                    && string.Equals(presence.Lastname, lastName, StringComparison.CurrentCultureIgnoreCase))
-                    return presence;
+                try
+                {
+                    if (string.Equals(presences[i].Firstname, firstName, StringComparison.CurrentCultureIgnoreCase)
+                    && string.Equals(presences[i].Lastname, lastName, StringComparison.CurrentCultureIgnoreCase))
+                        return presences[i];
+                }
+                catch { }
             }
             return null;
         }
@@ -956,9 +1021,15 @@ namespace OpenSim.Region.Framework.Scenes
         protected internal ScenePresence GetScenePresence(uint localID)
         {
             List<ScenePresence> presences = GetScenePresences();
-            foreach (ScenePresence presence in presences)
-                if (presence.LocalId == localID)
-                    return presence;
+            for (int i = 0; i < presences.Count; ++i)
+            {
+                try
+                {
+                    if (presences[i].LocalId == localID)
+                        return presences[i];
+                }
+                catch { }
+            }
             return null;
         }
 
@@ -972,15 +1043,22 @@ namespace OpenSim.Region.Framework.Scenes
         protected internal bool TryGetAvatarByName(string name, out ScenePresence avatar)
         {
             avatar = null;
-            foreach (ScenePresence presence in GetScenePresences())
+
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
             {
-                if (String.Compare(name, presence.ControllingClient.Name, true) == 0)
+                try
                 {
-                    avatar = presence;
-                    break;
+                    if (String.Compare(name, presences[i].ControllingClient.Name, true) == 0)
+                    {
+                        avatar = presences[i];
+                        // avatar is not null since we just uses presences[i].ControllingClient 
+                        return true; // found it!
+                    }
                 }
+                catch { }
             }
-            return (avatar != null);
+            return false;
         }
 
         /// <summary>
@@ -1023,13 +1101,13 @@ namespace OpenSim.Region.Framework.Scenes
                 }
             }
 
-            EntityBase[] entityList = GetEntities();
-            foreach (EntityBase ent in entityList)
+            EntityBase[] entityArray = GetEntities();
+            for (int i = 0; i < entityArray.Length; ++i)
             {
                 //m_log.DebugFormat("Looking at entity {0}", ent.UUID);
-                if (ent is SceneObjectGroup)
+                if (entityArray[i] is SceneObjectGroup)
                 {
-                    sog = (SceneObjectGroup)ent;
+                    sog = (SceneObjectGroup)entityArray[i];
                     if (sog.ContainsPart(localID))
                     {
                         lock (SceneObjectGroupsByLocalPartID)
@@ -1062,12 +1140,12 @@ namespace OpenSim.Region.Framework.Scenes
                     SceneObjectGroupsByFullPartID.Remove(fullID);
             }
 
-            EntityBase[] entityList = GetEntities();
-            foreach (EntityBase ent in entityList)
+            EntityBase[] entityArray = GetEntities();
+            for (int i = 0; i < entityArray.Length; ++i)
             {
-                if (ent is SceneObjectGroup)
+                if (entityArray[i] is SceneObjectGroup)
                 {
-                    sog = (SceneObjectGroup)ent;
+                    sog = (SceneObjectGroup)entityArray[i];
                     if (sog.ContainsPart(fullID))
                     {
                         lock (SceneObjectGroupsByFullPartID)
@@ -1085,12 +1163,12 @@ namespace OpenSim.Region.Framework.Scenes
             // Primitive Ray Tracing
             float closestDistance = 280f;
             EntityIntersection result = new EntityIntersection();
-            EntityBase[] EntityList = GetEntities();
-            foreach (EntityBase ent in EntityList)
+            EntityBase[] entityArray = GetEntities();
+            for (int i = 0; i < entityArray.Length; ++i)
             {
-                if (ent is SceneObjectGroup)
+                if (entityArray[i] is SceneObjectGroup)
                 {
-                    SceneObjectGroup reportingG = (SceneObjectGroup)ent;
+                    SceneObjectGroup reportingG = (SceneObjectGroup)entityArray[i];
                     EntityIntersection inter = reportingG.TestIntersection(hray, frontFacesOnly, faceCenters);
                     if (inter.HitTF && inter.distance < closestDistance)
                     {
@@ -1162,25 +1240,22 @@ namespace OpenSim.Region.Framework.Scenes
         /// <returns>null if the part was not found</returns>
         protected internal SceneObjectGroup GetSceneObjectGroup(string name)
         {
-            SceneObjectGroup so = null;
-
-            Entities.Find(
-                delegate(EntityBase entity)
+            EntityBase[] entityArray = Entities.GetEntities();
+            for (int i = 0; i < entityArray.Length; ++i)
+            {
+                try
                 {
-                    if (entity is SceneObjectGroup)
+                    if (entityArray[i] is SceneObjectGroup)
                     {
-                        if (entity.Name == name)
+                        if (entityArray[i].Name == name)
                         {
-                            so = (SceneObjectGroup)entity;
-                            return true;
+                            return (SceneObjectGroup)entityArray[i];
                         }
                     }
-
-                    return false;
                 }
-            );
-
-            return so;
+                catch { }
+            }
+            return null;
         }
 
         /// <summary>
@@ -1204,30 +1279,26 @@ namespace OpenSim.Region.Framework.Scenes
         /// <returns>null if the part was not found</returns>
         protected internal SceneObjectPart GetSceneObjectPart(string name)
         {
-            SceneObjectPart sop = null;
-
-            Entities.Find(
-                delegate(EntityBase entity)
+            EntityBase[] entityArray = Entities.GetEntities();
+            for (int i = 0; i < entityArray.Length; ++i)
+            {
+                try
                 {
-                    if (entity is SceneObjectGroup)
+                    if (entityArray[i] is SceneObjectGroup)
                     {
-                        foreach (SceneObjectPart p in ((SceneObjectGroup)entity).Parts)
+                        foreach (SceneObjectPart p in ((SceneObjectGroup)entityArray[i]).Parts)
                         {
-//                            m_log.DebugFormat("[SCENE GRAPH]: Part {0} has name {1}", p.UUID, p.Name);
-
                             if (p.Name == name)
                             {
-                                sop = p;
-                                return true;
+                                return p;
                             }
                         }
                     }
-
-                    return false;
                 }
-            );
-
-            return sop;
+                catch { }
+            }
+ 
+            return null;
         }
 
         /// <summary>
@@ -1281,11 +1352,12 @@ namespace OpenSim.Region.Framework.Scenes
         /// <param name="action"></param>
         protected internal void ForEachSOG(Action<SceneObjectGroup> action)
         {
-            foreach (SceneObjectGroup obj in GetSceneObjectGroups())
+            List<SceneObjectGroup> objs = GetSceneObjectGroups();
+            for (int i = 0; i < objs.Count; ++i)
             {
                 try
                 {
-                    action(obj);
+                    action(objs[i]);
                 }
                 catch (Exception e)
                 {
@@ -1303,11 +1375,19 @@ namespace OpenSim.Region.Framework.Scenes
         /// <param name="action"></param>
         public void ForEachAvatar(Action<ScenePresence> action)
         {
-            ForEachScenePresence(delegate(ScenePresence sp)
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
             {
-                if (!sp.IsChildAgent)
-                    action(sp);
-            });
+                try
+                {
+                    if (!presences[i].IsChildAgent)
+                        action(presences[i]);
+                }
+                catch (Exception e)
+                {
+                    m_log.Error("[SCENEGRAPH]: Error in " + m_parentScene.RegionInfo.RegionName + ": " + e.ToString());
+                }
+            }
         }
 
         /// <summary>
@@ -1320,33 +1400,67 @@ namespace OpenSim.Region.Framework.Scenes
         {
             // Once all callers have their delegates configured for parallelism, we can unleash this
             /*
-            Action<ScenePresence> protectedAction = new Action<ScenePresence>(delegate(ScenePresence sp)
-                {
-                    try
+                Action<ScenePresence> protectedAction = new Action<ScenePresence>(delegate (ScenePresence sp)
                     {
-                        action(sp);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.Info("[SCENEGRAPH]: Error in " + m_parentScene.RegionInfo.RegionName + ": " + e.ToString());
-                        m_log.Info("[SCENEGRAPH]: Stack Trace: " + e.StackTrace);
-                    }
-                });
-            Parallel.ForEach<ScenePresence>(GetScenePresences(), protectedAction);
+                        try
+                        {
+                            action(sp);
+                        }
+                        catch (Exception e)
+                        {
+                            m_log.Info("[SCENEGRAPH]: Error in " + m_parentScene.RegionInfo.RegionName + ": " + e.ToString());
+                            m_log.Info("[SCENEGRAPH]: Stack Trace: " + e.StackTrace);
+                        }
+                    });
+                Parallel.ForEach<ScenePresence>(GetScenePresences(), protectedAction);
             */
-            // For now, perform actions serially
+            // Perform actions serially
             List<ScenePresence> presences = GetScenePresences();
-            foreach (ScenePresence sp in presences)
+            for (int i = 0; i < presences.Count; ++i)
             {
                 try
                 {
-                    action(sp);
+                    action(presences[i]);
                 }
                 catch (Exception e)
                 {
                     m_log.Error("[SCENEGRAPH]: Error in " + m_parentScene.RegionInfo.RegionName + ": " + e.ToString());
                 }
             }
+        }
+
+        public int ForEachScenePresenceCount(Action<ScenePresence> action)
+        {
+            // Once all callers have their delegates configured for parallelism, we can unleash this
+            /*
+                Action<ScenePresence> protectedAction = new Action<ScenePresence>(delegate (ScenePresence sp)
+                    {
+                        try
+                        {
+                            action(sp);
+                        }
+                        catch (Exception e)
+                        {
+                            m_log.Info("[SCENEGRAPH]: Error in " + m_parentScene.RegionInfo.RegionName + ": " + e.ToString());
+                            m_log.Info("[SCENEGRAPH]: Stack Trace: " + e.StackTrace);
+                        }
+                    });
+                Parallel.ForEach<ScenePresence>(GetScenePresences(), protectedAction);
+            */
+            // Perform actions serially
+            List<ScenePresence> presences = GetScenePresences();
+            for (int i = 0; i < presences.Count; ++i)
+            {
+                try
+                {
+                    action(presences[i]);
+                }
+                catch (Exception e)
+                {
+                    m_log.Error("[SCENEGRAPH]: Error in " + m_parentScene.RegionInfo.RegionName + ": " + e.ToString());
+                }
+            }
+            return presences.Count;
         }
 
         #endregion

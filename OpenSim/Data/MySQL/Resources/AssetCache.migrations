@@ -1,0 +1,138 @@
+﻿# -----------------
+:VERSION 10
+
+BEGIN;
+
+#SET GLOBAL innodb_file_per_table=1;
+#SET GLOBAL innodb_file_format=Barracuda;
+#SET GLOBAL autocommit=0;
+
+CREATE TABLE IF NOT EXISTS `assets_0` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 ;
+ALTER TABLE assets_0 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_1` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_1 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_2` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_2 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_3` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_3 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_4` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_4 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_5` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_5 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_6` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_6 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_7` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_7 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_8` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_8 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_9` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_9 key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_a` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_a key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_b` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_b key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_c` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_c key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_d` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_d key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_e` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_e key_block_size=8 row_format=compressed;
+
+CREATE TABLE IF NOT EXISTS `assets_f` (
+  `asset` longblob NOT NULL,
+  `id` binary(16) NOT NULL,
+  `access_time` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+ALTER TABLE assets_f key_block_size=8 row_format=compressed;
+
+COMMIT;

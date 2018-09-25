@@ -1,4 +1,5 @@
-/*
+/* 25 May 2018
+ * 
  * Copyright (c) Contributors, http://opensimulator.org/
  * See CONTRIBUTORS.TXT for a full list of copyright holders.
  *
@@ -37,76 +38,123 @@ namespace OpenSim.Region.Framework.Scenes
 {
     public class EntityManager
     {
-//        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        protected readonly Dictionary<UUID, EntityBase> m_entities_U = new Dictionary<UUID, EntityBase>();
+        protected readonly Dictionary<uint, EntityBase> m_entities_L = new Dictionary<uint, EntityBase>();
 
-        private readonly DoubleDictionaryThreadAbortSafe<UUID, uint, EntityBase> m_entities
-            = new DoubleDictionaryThreadAbortSafe<UUID, uint, EntityBase>();
+        protected readonly Object m_syncLock = new Object();
 
         public int Count
         {
-            get { return m_entities.Count; }
+            get
+            {
+                lock (m_syncLock)
+                      return m_entities_U.Count;
+            }
         }
 
         public void Add(EntityBase entity)
         {
-            m_entities.Add(entity.UUID, entity.LocalId, entity);
+            lock (m_syncLock)
+            {
+                m_entities_U[entity.UUID] = entity;
+                m_entities_L[entity.LocalId] = entity;
+            }
         }
 
         public void Clear()
         {
-            m_entities.Clear();
+            lock (m_syncLock)
+            {
+                 m_entities_U.Clear();
+                 m_entities_L.Clear();
+            }
         }
 
         public bool ContainsKey(UUID id)
         {
-            return m_entities.ContainsKey(id);
+            try
+            {
+                return m_entities_U.ContainsKey(id);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public bool ContainsKey(uint localID)
         {
-            return m_entities.ContainsKey(localID);
+            try
+            {
+                return m_entities_L.ContainsKey(localID);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+        private void RemoveEntity(UUID id, uint localID)
+        {
+            m_entities_L.Remove(localID);
+            m_entities_U.Remove(id);
         }
 
         public bool Remove(uint localID)
         {
-            return m_entities.Remove(localID);
+            EntityBase entity;
+            lock (m_syncLock)
+            {
+                if (m_entities_L.TryGetValue(localID, out entity))
+                {
+                    RemoveEntity(entity.UUID, localID);
+                    return true;
+                }
+            }
+            return false;
         }
 
         public bool Remove(UUID id)
         {
-            return m_entities.Remove(id);
-        }
-
-        public EntityBase[] GetAllByType<T>()
-        {
-            List<EntityBase> tmp = new List<EntityBase>();
-
-            ForEach(
-                delegate(EntityBase entity)
+            EntityBase entity;
+            lock (m_syncLock)
+            {
+                if (m_entities_U.TryGetValue(id, out entity))
                 {
-                    if (entity is T)
-                        tmp.Add(entity);
+                    RemoveEntity(id, entity.LocalId);
+                    return true;
                 }
-            );
-
-            return tmp.ToArray();
+            }
+            return false;
         }
 
         public EntityBase[] GetEntities()
         {
-            List<EntityBase> tmp = new List<EntityBase>(m_entities.Count);
-            ForEach(delegate(EntityBase entity) { tmp.Add(entity); });
-            return tmp.ToArray();
+            EntityBase[] tmpArray;
+            lock (m_syncLock)
+            {
+                tmpArray  = new EntityBase[m_entities_U.Count];
+                m_entities_U.Values.CopyTo(tmpArray, 0);
+            }
+            return tmpArray;
         }
 
-        public void ForEach(Action<EntityBase> action)
+        public EntityBase[] GetAllByType<T>()
         {
-            m_entities.ForEach(action);
-        }
+            EntityBase[] tmpArray = GetEntities();
 
-        public EntityBase Find(Predicate<EntityBase> predicate)
-        {
-            return m_entities.FindValue(predicate);
+            List<EntityBase> tmpList = new List<EntityBase>();
+            // benchmarking shows for is slightly faster than foreach.
+            for (int i = 0; i < tmpArray.Length; i++)
+            {
+                if (tmpArray[i] is T)
+                {
+                    tmpList.Add(tmpArray[i]);
+                }
+            }
+
+            return tmpList.ToArray();
         }
 
         public EntityBase this[UUID id]
@@ -114,7 +162,7 @@ namespace OpenSim.Region.Framework.Scenes
             get
             {
                 EntityBase entity;
-                m_entities.TryGetValue(id, out entity);
+                TryGetValue(id, out entity);
                 return entity;
             }
             set
@@ -128,7 +176,7 @@ namespace OpenSim.Region.Framework.Scenes
             get
             {
                 EntityBase entity;
-                m_entities.TryGetValue(localID, out entity);
+                TryGetValue(localID, out entity);
                 return entity;
             }
             set
@@ -139,12 +187,22 @@ namespace OpenSim.Region.Framework.Scenes
 
         public bool TryGetValue(UUID key, out EntityBase obj)
         {
-            return m_entities.TryGetValue(key, out obj);
+            try { return m_entities_U.TryGetValue(key, out obj); }
+            catch (Exception)
+            {
+                obj = null;
+                return false;
+            }
         }
 
         public bool TryGetValue(uint key, out EntityBase obj)
         {
-            return m_entities.TryGetValue(key, out obj);
+            try { return m_entities_L.TryGetValue(key, out obj); }
+            catch (Exception)
+            {
+                obj = null;
+                return false;
+            }
         }
     }
 }
